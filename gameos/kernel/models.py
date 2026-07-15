@@ -49,7 +49,8 @@ class CampaignRecord(Base):
     __tablename__ = "campaign_records"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+    # Nullable: campaigns arrive unmapped; a later mapping step ties them to games.
+    game_id: Mapped[int | None] = mapped_column(ForeignKey("games.id"))
     date: Mapped[date] = mapped_column(Date, index=True)
     ua_platform: Mapped[str] = mapped_column(String(20))  # google | meta | mintegral
     campaign_id: Mapped[str] = mapped_column(String(100))
