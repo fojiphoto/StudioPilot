@@ -9,8 +9,11 @@
 - httpx request logging silenced (was printing API keys in URLs).
 - Real `APPLOVIN_REPORT_KEY` lives in local `.env` (gitignored).
 
+### Done (part 3)
+- **AdMob connector live and verified**: OAuth flow completed via `scripts/google_oauth.py admob` (refresh token in `.env`), publisher auto-detected (`pub-5758568476782265`). Real pull works — only 1 row / $0.02 in last 3 days (AdMob mediation barely used; AppLovin MAX is the main mediation). Phase 1 complete.
+
 ### Next
-- AdMob connector: waiting on owner to finish Google Cloud setup (enable AdMob API → OAuth consent screen + test user → Desktop OAuth client → run `python scripts/google_oauth.py admob` → put ADMOB_* values in `.env`), then build + self-test the connector.
+- Phase 2: Google Ads + Meta + Mintegral connectors → `CampaignRecord`. Google Ads can reuse `scripts/google_oauth.py googleads` (needs GOOGLE_ADS_DEVELOPER_TOKEN too). Need Meta access token + ad account id, and Mintegral API key/secret from owner.
 - Note: local SQLite dev DB was reset when `source` column was added (create_all doesn't migrate). Fine now; consider Alembic once schema stabilizes.
 
 ## 2026-07-15 — Session 1
