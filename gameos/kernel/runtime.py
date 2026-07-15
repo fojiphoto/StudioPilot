@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from apscheduler.schedulers.blocking import BlockingScheduler
+from dotenv import load_dotenv
 from sqlalchemy.orm import Session, sessionmaker
 
 from gameos.kernel import db, registry
@@ -49,11 +50,14 @@ class Context:
 
 class Engine:
     def __init__(self, settings: Settings | None = None) -> None:
+        load_dotenv()  # module credentials (APPLOVIN_*, ADMOB_*, ...) come from .env
         self.settings = settings or load_settings()
         logging.basicConfig(
             level=self.settings.log_level,
             format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
         )
+        # httpx logs full request URLs at INFO - those can contain API keys. Keep it quiet.
+        logging.getLogger("httpx").setLevel(logging.WARNING)
         engine = db.make_engine(self.settings.db_url)
         self.ctx = Context(
             settings=self.settings,

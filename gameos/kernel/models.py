@@ -21,6 +21,7 @@ class Game(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(200))
     store: Mapped[str] = mapped_column(String(20))  # ios | android | amazon
+    package_name: Mapped[str | None] = mapped_column(String(200), index=True)  # bundle id, joins sources
     genre: Mapped[str | None] = mapped_column(String(100))
     launch_date: Mapped[date | None] = mapped_column(Date)
     dev_cost: Mapped[float] = mapped_column(Float, default=0.0)  # manual entry, feeds P&L
@@ -35,7 +36,8 @@ class AdRevenueRecord(Base):
     game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
     date: Mapped[date] = mapped_column(Date, index=True)
     hour: Mapped[int | None] = mapped_column(Integer)
-    network: Mapped[str] = mapped_column(String(50))   # applovin_max | admob | ...
+    source: Mapped[str] = mapped_column(String(50), index=True)  # which mediation reported it: applovin_max | admob
+    network: Mapped[str] = mapped_column(String(50))   # serving ad network within the mediation
     country: Mapped[str | None] = mapped_column(String(2))
     platform: Mapped[str] = mapped_column(String(20))  # ios | android | amazon
     impressions: Mapped[int] = mapped_column(Integer, default=0)

@@ -1,5 +1,18 @@
 # STATUS
 
+## 2026-07-15 — Session 1 (part 2: Phase 1 started)
+
+### Done
+- **AppLovin MAX connector live and verified with real data**: 3,560 revenue rows / ~245 games (mostly Amazon Appstore) pulled and stored. Self-test: `gameos test applovin_max`. Rolling 3-day window, idempotent replace, per-source freshness recorded.
+- Models: added `AdRevenueRecord.source` (applovin_max | admob) and `Game.package_name`.
+- `scripts/google_oauth.py` — one-time browser OAuth helper to obtain ADMOB/GOOGLE_ADS refresh tokens locally (no passwords shared).
+- httpx request logging silenced (was printing API keys in URLs).
+- Real `APPLOVIN_REPORT_KEY` lives in local `.env` (gitignored).
+
+### Next
+- AdMob connector: waiting on owner to finish Google Cloud setup (enable AdMob API → OAuth consent screen + test user → Desktop OAuth client → run `python scripts/google_oauth.py admob` → put ADMOB_* values in `.env`), then build + self-test the connector.
+- Note: local SQLite dev DB was reset when `source` column was added (create_all doesn't migrate). Fine now; consider Alembic once schema stabilizes.
+
 ## 2026-07-15 — Session 1
 
 ### Done
