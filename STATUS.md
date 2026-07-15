@@ -12,9 +12,16 @@
 ### Done (part 3)
 - **AdMob connector live and verified**: OAuth flow completed via `scripts/google_oauth.py admob` (refresh token in `.env`), publisher auto-detected (`pub-5758568476782265`). Real pull works — only 1 row / $0.02 in last 3 days (AdMob mediation barely used; AppLovin MAX is the main mediation). Phase 1 complete.
 
+### Done (part 4 — Phase 2 mostly complete)
+- **Meta Ads connector** built + API-verified (auth, insights query, pagination OK). BUT: both ad accounts visible to the owner's token (`act_657944574693908` GamesAds USD, `act_324156006` ARS) contain **zero campaigns ever** — owner's real Meta campaigns are elsewhere (likely a Business Manager account). Owner says Meta is for future use; connector will pick data up automatically once campaigns run in a visible account. Token is short-lived — need App ID + App Secret from owner to exchange for a 60-day token.
+- **Mintegral connector live and verified with real data**: 7 campaign-day rows, 1 campaign (id 171784), $0 spend last 7d (campaigns currently paused; owner confirmed Mintegral is the active UA platform). API quirks documented in the module: md5(api_key + md5(timestamp)) token, async 201→poll→type=2 TSV fetch, 7-day max window, D-1 freshness.
+- `CampaignRecord.game_id` now nullable — campaigns arrive unmapped; campaign→game mapping step needed later (Mintegral Campaign dimension gives ids only, no names).
+
 ### Next
-- Phase 2: Google Ads + Meta + Mintegral connectors → `CampaignRecord`. Google Ads can reuse `scripts/google_oauth.py googleads` (needs GOOGLE_ADS_DEVELOPER_TOKEN too). Need Meta access token + ad account id, and Mintegral API key/secret from owner.
-- Note: local SQLite dev DB was reset when `source` column was added (create_all doesn't migrate). Fine now; consider Alembic once schema stabilizes.
+- Google Ads connector: waiting on owner for Developer Token (API Center in an MCC) + Customer ID; OAuth reuses `scripts/google_oauth.py googleads`.
+- Meta long-lived token: waiting on App ID + App Secret.
+- Then Phase 3 (Firebase/GameAnalytics) or jump to Phase 4 analyzers (ROAS/P&L) — revenue + spend data already flowing, analyzers are now buildable.
+- Note: local SQLite dev DB reset twice for schema changes (create_all doesn't migrate). Consider Alembic once schema stabilizes.
 
 ## 2026-07-15 — Session 1
 
