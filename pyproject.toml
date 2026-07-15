@@ -1,0 +1,24 @@
+[project]
+name = "studiopilot-gameos"
+version = "0.1.0"
+description = "GameOS - always-on modular agent for mobile game UA & monetization decisions"
+requires-python = ">=3.11"
+dependencies = [
+    "apscheduler>=3.10",
+    "sqlalchemy>=2.0",
+    "pydantic>=2.5",
+    "pydantic-settings>=2.1",
+    "python-dotenv>=1.0",
+    "typer>=0.9",
+    "httpx>=0.26",
+]
+
+[project.scripts]
+gameos = "gameos.cli:app"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["gameos*"]
