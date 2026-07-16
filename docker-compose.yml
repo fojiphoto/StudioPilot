@@ -64,10 +64,9 @@ services:
     ports:
       - "80:80"
       - "443:443"
-    environment:
-      DOMAIN: ${DOMAIN}
-      DASHBOARD_USER: ${DASHBOARD_USER}
-      DASHBOARD_PASS_HASH: ${DASHBOARD_PASS_HASH}
+    # env_file (not `environment: ${...}`) so the bcrypt hash's $ chars reach Caddy
+    # verbatim instead of being mangled by compose interpolation.
+    env_file: .env
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddydata:/data

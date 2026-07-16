@@ -74,8 +74,21 @@
 - Portal auth: Caddy basic_auth (DASHBOARD_USER + hashed pass) so the public portal isn't open. Collector stays public but is protected by per-game ingest keys.
 - Compose YAML validated. Docker not installed locally (fine — builds on VPS).
 
-### Blocked on owner
-- **Buy a VPS (~$5/mo, 2GB) + point a domain/subdomain at it.** Then follow DEPLOY.md (or hand me SSH access and I'll deploy). This unlocks: 24/7 engine, public SDK collector, and the portal reachable from phone/anywhere.
+### Done (part 14 — LIVE on VPS 🎉)
+- **GameOS is deployed and running 24/7 on a Hetzner VPS** (Falkenstein). Full stack up: Postgres + engine + collector + dashboard + Caddy auto-HTTPS. All 5 containers healthy.
+- **Portal** is live over HTTPS behind basic auth. Verified: 401 without auth, 200 with, real data ($2,267 net / 472 games / 45d).
+- **SDK collector** `/collect` is public (ingest-key auth); `/health` verified.
+- Used the host's rDNS hostname so it works WITHOUT custom DNS (owner couldn't find the host's Zone Editor). Custom domain later.
+- 45-day backfill done in cloud Postgres; ingest keys minted for all games.
+- **Server IP, URL, SSH key, portal login — NOT in this repo (it's public). They live only in local auto-memory `gameos-vps-deployment` and the server's gitignored `.env`.**
+- Fixes applied live: 2GB swap added (RAM tight); Caddyfile rewritten multi-line (single-line blocks failed); proxy env `$`-hash issue avoided by inlining hash in Caddyfile.
+
+### Not yet committed to repo (server has them, repo doesn't)
+- The multi-line Caddyfile fix and proxy compose tweak were done ON THE SERVER only. Repo's Caddyfile still has the single-line-block bug + env-based hash. **Fix repo Caddyfile/compose next session** so a fresh `git pull` deploy works cleanly.
+
+### Blocked on owner (optional / later)
+- Point `gameos.factorialstudio.com` A record → server IP (host's Zone Editor), then swap DOMAIN. rDNS hostname works fine until then.
+- Change portal password from the default.
 
 ### Next / reminders
 - After VPS is up: backfill into cloud Postgres, `gameos ingest-key --all`, instrument a pilot Amazon game with GameOSAnalytics.cs pointing at https://<domain>/collect.
