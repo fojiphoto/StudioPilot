@@ -40,9 +40,11 @@
 - **Campaign→game mapping**: `CampaignMap` table; UA connectors (meta/mintegral/google) consult it on every pull; CLI: `gameos games [search]`, `gameos campaigns`, `gameos map <platform> <campaign_id> <game_id>` (updates existing rows too). Mintegral campaign 171784 ($0.34) still unmapped — need owner to say which game it is.
 - ADMOB_PUBLISHER_ID pinned to pub-8035849541939283.
 
+### Done (part 8 — Mintegral auto-mapping)
+- Mintegral open API campaign list (`/api/open/v1/campaign`) gives campaign_name + bundle_id. Connector now auto-maps every campaign to its game by bundle_id == Game.package_name on each run (owner `gameos map` overrides win), and enriches CampaignRecord.campaign_name. **All 18 campaigns auto-mapped, 100% match.** Only campaign 171784 (TapAreena) had any delivery in the last 45d ($0.34).
+
 ### Next
 - Phase 5 outputs: Telegram alerts module (needs bot token + chat id from owner — @BotFather).
-- Ask owner which game Mintegral campaign 171784 belongs to → `gameos map mintegral 171784 <game_id>`.
 - Game dedup/merge: AdMob and MAX register the same game under different names (e.g. "Wordall: Daily Word Test" vs "Wordall - Daily Word Test Game") — merge by package_name where possible.
 - Meta token auto-refresh module (60d expiry, exchanged 2026-07-16).
 - When Google Ads Basic Access approves: `gameos test google_ads` then `gameos backfill google_ads --days 45`.

@@ -19,11 +19,12 @@ from datetime import date, timedelta
 
 import httpx
 
-from gameos.kernel.models import CampaignMap, CampaignRecord
+from gameos.kernel.models import CampaignMap, CampaignRecord, Game
 from gameos.kernel.module import Module, ModuleInfo, ModuleType
 from gameos.kernel.runtime import Context
 
 REPORT_URL = "https://ss-api.mintegral.com/api/v2/reports/data"
+CAMPAIGN_URL = "https://ss-api.mintegral.com/api/open/v1/campaign"
 PULL_DAYS = 7  # also the API's per-request maximum
 POLL_ATTEMPTS = 30
 POLL_SLEEP_SECONDS = 10
@@ -102,23 +103,84 @@ class Mintegral(Module):
             page += 1
         return rows
 
+    def _fetch_campaigns(self) -> list[dict]:
+        """Campaign list from the open API - gives campaign_name and bundle_id."""
+        campaigns: list[dict] = []
+        page = 1
+        while True:
+            response = httpx.get(
+                CAMPAIGN_URL, headers=self._headers(), params={"page": page, "limit": 50}, timeout=60
+            )
+            response.raise_for_status()
+            data = response.json().get("data") or {}
+            batch = data.get("list") or []
+            campaigns.extend(batch)
+            if len(campaigns) >= int(data.get("total") or 0) or not batch:
+                break
+            page += 1
+        return campaigns
+
+    def _sync_campaign_map(self, ctx: Context) -> dict[str, str]:
+        """Auto-map campaigns to games via bundle_id == Game.package_name.
+        Owner overrides via `gameos map` always win (existing entries untouched).
+        Returns {campaign_id: campaign_name} for name enrichment."""
+        try:
+            campaigns = self._fetch_campaigns()
+        except Exception:
+            self.log.exception("campaign list fetch failed - skipping auto-map this run")
+            return {}
+        names: dict[str, str] = {}
+        with ctx.session() as session:
+            mapped = {
+                m.campaign_id
+                for m in session.query(CampaignMap).filter_by(ua_platform="mintegral").all()
+            }
+            games_by_package = {}
+            for game in session.query(Game).filter(Game.package_name.is_not(None)).all():
+                games_by_package.setdefault(game.package_name.lower(), game.id)
+            for campaign in campaigns:
+                campaign_id = str(campaign.get("campaign_id") or "")
+                if not campaign_id:
+                    continue
+                names[campaign_id] = campaign.get("campaign_name") or ""
+                if campaign_id in mapped:
+                    continue
+                bundle = (campaign.get("bundle_id") or "").lower()
+                game_id = games_by_package.get(bundle)
+                if game_id is None:
+                    self.log.info(
+                        "campaign %s (%s) bundle %s has no matching game yet - map manually with "
+                        "`gameos map mintegral %s <game_id>`",
+                        campaign_id, names[campaign_id], bundle or "?", campaign_id,
+                    )
+                    continue
+                session.add(
+                    CampaignMap(ua_platform="mintegral", campaign_id=campaign_id, game_id=game_id)
+                )
+                self.log.info("auto-mapped campaign %s (%s) -> game #%s [%s]",
+                              campaign_id, names[campaign_id], game_id, bundle)
+            session.commit()
+        return names
+
     def run(self, ctx: Context) -> None:
+        names = self._sync_campaign_map(ctx)
         end = date.today() - timedelta(days=1)  # D-1: today's data doesn't exist yet
-        self._ingest(ctx, end - timedelta(days=PULL_DAYS - 1), end)
+        self._ingest(ctx, end - timedelta(days=PULL_DAYS - 1), end, names)
 
     def backfill(self, ctx: Context, days: int) -> str:
         """API allows 7 days per request - walk backwards in 7-day chunks."""
+        names = self._sync_campaign_map(ctx)
         end = date.today() - timedelta(days=1)
         start = end - timedelta(days=days - 1)
         total = 0
         chunk_end = end
         while chunk_end >= start:
             chunk_start = max(start, chunk_end - timedelta(days=6))
-            total += self._ingest(ctx, chunk_start, chunk_end)
+            total += self._ingest(ctx, chunk_start, chunk_end, names)
             chunk_end = chunk_start - timedelta(days=1)
         return f"backfilled {total} rows over {days} days ({start}..{end})"
 
-    def _ingest(self, ctx: Context, start: date, end: date) -> int:
+    def _ingest(self, ctx: Context, start: date, end: date, names: dict[str, str] | None = None) -> int:
         rows = self._fetch(start, end)
         self.log.info("mintegral returned %d campaign-day rows for %s..%s", len(rows), start, end)
 
@@ -142,7 +204,7 @@ class Mintegral(Module):
                     date=date(int(raw_date[:4]), int(raw_date[4:6]), int(raw_date[6:8])),
                     ua_platform="mintegral",
                     campaign_id=campaign_id,
-                    campaign_name=None,  # Campaign dimension returns ids only
+                    campaign_name=(names or {}).get(campaign_id),
                     spend=spend,
                     installs=installs,
                     cpi=(spend / installs) if installs else 0.0,
