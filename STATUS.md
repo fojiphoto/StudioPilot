@@ -26,11 +26,19 @@
   - `gameos report` now shows: freshness, 7d portfolio ROAS, lifetime P&L top games + portfolio, alerts.
 - Caveat noted in code: "lifetime" = since GameOS started collecting. Historical backfill (MAX supports 45d query window) is a pending item.
 
+### Done (part 6 — Google/AdMob redo on correct account)
+- Owner discovered the first AdMob OAuth was done against the WRONG Google account (that's why it showed $0.02/1 app). Redid setup fresh in the owner's own project **cross-box-games** (project number 301924103303, account crossboxgames00@gmail.com): new Desktop OAuth client, consent screen, test user.
+- **AdMob now on the correct account**: publisher `pub-8035849541939283`, 420 rows / 12 apps / ~$4.70 per 3 days, verified + ingested. Both ADMOB_* and GOOGLE_ADS_* in `.env` now use the cross-box-games client. Old Irani-Gangster-project client is obsolete (its AdMob refresh token was for the wrong account).
+- **Google Ads OAuth done** (adwords scope refresh token in `.env`). `google_ads` connector built: REST searchStream + GAQL, version auto-negotiation (v21→v18), micros normalization, DEVELOPER_TOKEN_NOT_APPROVED explained in self-test.
+- Google Ads API Basic Access application: form filled + design doc PDF generated at `docs/GameOS-GoogleAds-API-Design.pdf` (LOCAL ONLY, gitignored — contains business figures). NOTE: form's Q2 was answered with old project number 630236845603; actual project is now 301924103303 — update Google if review asks.
+- Blocker for google_ads self-test: **Google Ads API not enabled in project 301924103303** — owner given direct enable link. After that, expect DEVELOPER_TOKEN_NOT_APPROVED until Basic Access approves (~5 business days).
+
 ### Next
-- Google Ads: after owner adds test user → OAuth → build connector (GAQL searchStream). Data flows once Basic Access approved.
-- Campaign→game mapping mechanism (Mintegral campaign 171784 unmapped; CampaignRecord.game_id NULL).
-- Historical backfill for AppLovin MAX (45 days) so P&L means something.
+- Confirm Google Ads API enabled → re-run `gameos test google_ads` (expect token-not-approved message = wiring OK).
+- Campaign→game mapping mechanism (Mintegral campaign 171784 unmapped).
+- Historical backfill for AppLovin MAX (45 days) + AdMob so P&L means something.
 - Phase 5 outputs: Telegram alerts (needs bot token + chat id from owner).
+- Watch for: AdMob and MAX may register the same game under slightly different names (e.g. "Wordall: Daily Word Test" vs "Wordall - Daily Word Test Game") — game dedup/merge by package_name needed.
 - Note: local SQLite dev DB reset twice for schema changes. Consider Alembic once schema stabilizes.
 
 ## 2026-07-15 — Session 1
