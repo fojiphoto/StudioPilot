@@ -43,8 +43,12 @@
 ### Done (part 8 — Mintegral auto-mapping)
 - Mintegral open API campaign list (`/api/open/v1/campaign`) gives campaign_name + bundle_id. Connector now auto-maps every campaign to its game by bundle_id == Game.package_name on each run (owner `gameos map` overrides win), and enriches CampaignRecord.campaign_name. **All 18 campaigns auto-mapped, 100% match.** Only campaign 171784 (TapAreena) had any delivery in the last 45d ($0.34).
 
+### Done (part 9 — Phase 5 outputs + dashboard)
+- **Telegram DROPPED** (banned in Pakistan, owner would need a VPN). Replaced with **WhatsApp Cloud API**: `whatsapp_alerts` output module delivers undelivered Alert rows, marks `delivered_via`, retries on failure. Waiting on owner: add WhatsApp product to their existing Meta app (1330394172615111) → send WHATSAPP_PHONE_NUMBER_ID + their number + token → fill WHATSAPP_* in `.env` → `gameos test whatsapp_alerts`.
+- **Read-only web dashboard** (`gameos dashboard --port 8080`, gameos/dashboard.py): FastAPI + Chart.js; cards (7d revenue/spend/ROAS, lifetime net, game count), 30d revenue-vs-spend line, top-games bar, lifetime P&L table, alerts, per-source freshness. Verified in browser against real data. Engine does NOT depend on it (SPEC 5.9).
+
 ### Next
-- Phase 5 outputs: Telegram alerts module (needs bot token + chat id from owner — @BotFather).
+- WhatsApp credentials from owner → test end-to-end alert delivery.
 - Game dedup/merge: AdMob and MAX register the same game under different names (e.g. "Wordall: Daily Word Test" vs "Wordall - Daily Word Test Game") — merge by package_name where possible.
 - Meta token auto-refresh module (60d expiry, exchanged 2026-07-16).
 - When Google Ads Basic Access approves: `gameos test google_ads` then `gameos backfill google_ads --days 45`.

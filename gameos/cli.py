@@ -62,6 +62,19 @@ def test(name: str = typer.Argument(None, help="Module to self-test (omit for al
 
 
 @app.command()
+def dashboard(
+    host: str = typer.Option("127.0.0.1", help="Bind address (0.0.0.0 to expose on LAN)"),
+    port: int = typer.Option(8080),
+) -> None:
+    """Serve the optional read-only web dashboard (the engine never depends on it)."""
+    import uvicorn
+
+    from gameos.dashboard import app as dashboard_app
+
+    uvicorn.run(dashboard_app, host=host, port=port, log_level="warning")
+
+
+@app.command()
 def backfill(
     name: str = typer.Argument(..., help="Connector to backfill (e.g. applovin_max)"),
     days: int = typer.Option(45, help="How many days back"),
