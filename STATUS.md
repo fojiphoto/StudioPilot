@@ -57,9 +57,23 @@
 - `GameMetricRecord.mau` column added (empty table dropped/recreated).
 - **Dashboard per-game drill-down** (`/game/{id}` + `/api/game/{id}`): revenue-vs-spend, DAU/MAU, **ARPDAU/ARPMAU (computed as revenue ÷ DAU/MAU)**, retention D1/D7/D30, avg playtime, revenue-by-network — all with the same range presets/calendar. Top-games bar chart is click-through. Metric charts show a friendly note until an analytics connector lands (revenue/spend live already). Verified in browser on game 22.
 
+### Done (part 12 — own analytics SDK "MMP-lite", Phase 3 real work)
+- Decision: owner wants BOTH Firebase (free, GP/iOS) AND a first-party GameOS SDK (all games, esp. Amazon). Browser-scrape of GameAnalytics abandoned: internal API needs a short-lived Bearer token (cookies alone 401), auto-harvesting it was correctly blocked by safety, and GA page was in Demo mode anyway.
+- **GameOS SDK ingest pipeline built and verified end-to-end:**
+  - Models: `Device` (per game+device, first_seen cohort, last_seen), `SessionEvent` (raw install/session_start/session_end), `Game.ingest_key`.
+  - `gameos/collector.py`: FastAPI `/collect` endpoint, per-game ingest_key auth, updates Device + stores events. Run: `gameos collect --port 8090`.
+  - `engagement_metrics` analyzer: rolls events → GameMetricRecord (DAU, MAU rolling-30d, sessions, avg_playtime, retention D1/D7/D30) over a 35-day window.
+  - CLI: `gameos ingest-key <id>|--all|--show`.
+  - `sdk/unity/GameOSAnalytics.cs`: ~130-line Unity SDK (install/session_start/session_end, FireOS/Amazon-safe, no Google dep).
+  - VERIFIED: simulated 30 days / 9,442 events / 620 devices → DAU/MAU/retention computed correctly (retention matched the 40% sim return-rate). Test data then purged from game 22.
+- Dashboard per-game page already renders these (built part 11).
+
 ### Next / reminders
-- GameAnalytics pricing answer from owner → build `gameanalytics` connector (metrics.gameanalytics.com, X-API-Key) filling GameMetricRecord (dau/mau/retention/playtime + cohort LTV).
-- If GA too costly → Firebase BigQuery connector first (needs: Firebase console → project settings → Integrations → BigQuery ON per project + service account JSON).
+- Wire collector + engagement_metrics to auto-start inside the engine (currently `gameos collect` is separate). Then deploy on the VPS so games can reach it 24/7.
+- Owner action for SDK: pick a pilot game, add GameOSAnalytics.cs, set endpoint (needs VPS/domain) + ingest key, publish update. Amazon games first.
+- **Firebase/BigQuery connector** (parallel track, free, GP/iOS): owner enables BigQuery export per Firebase project (~48h) + service-account JSON → build connector against GA4 `events_*` schema → same GameMetricRecord.
+- GameAnalytics paid Metrics API price: still worth asking for instant coverage of existing installed base.
+- Cohort LTV: have install cohorts + retention now; LTV = cumulative game revenue / cohort size (approx, since ad revenue is game-level not user-level).
 - WhatsApp token from API Setup is TEMPORARY (~24h). For permanent: Business settings → System user → generate token with whatsapp_business_messaging, or regenerate from API Setup when it expires. Consider a token-health self-check.
 - 24h free-form window: owner should message the test number occasionally, or approve a template for anytime delivery.
 - Google Ads Basic Access pending (~5 days) → then `gameos backfill google_ads --days 45`.

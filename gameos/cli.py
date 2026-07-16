@@ -75,6 +75,54 @@ def dashboard(
 
 
 @app.command()
+def collect(
+    host: str = typer.Option("0.0.0.0", help="Bind address"),
+    port: int = typer.Option(8090),
+) -> None:
+    """Run the GameOS SDK event collector (always-on ingest endpoint)."""
+    import uvicorn
+
+    from gameos.collector import app as collector_app
+
+    uvicorn.run(collector_app, host=host, port=port, log_level="warning")
+
+
+@app.command(name="ingest-key")
+def ingest_key(
+    game_id: int = typer.Argument(None, help="Game id (omit with --all)"),
+    all_games: bool = typer.Option(False, "--all", help="Mint keys for every game lacking one"),
+    show: bool = typer.Option(False, "--show", help="List games that already have keys"),
+) -> None:
+    """Mint / list the per-game ingest key used by the GameOS SDK."""
+    import secrets
+
+    from gameos.kernel.models import Game
+
+    engine = Engine()
+    with engine.ctx.session() as session:
+        if show:
+            for game in session.query(Game).filter(Game.ingest_key.is_not(None)).all():
+                typer.echo(f"  #{game.id:<5} {game.ingest_key}  {game.name}")
+            return
+        if all_games:
+            games = session.query(Game).filter(Game.ingest_key.is_(None)).all()
+        elif game_id is not None:
+            game = session.get(Game, game_id)
+            if game is None:
+                typer.echo(f"no game with id {game_id}", err=True)
+                raise typer.Exit(1)
+            games = [game]
+        else:
+            typer.echo("give a game_id or --all", err=True)
+            raise typer.Exit(1)
+        for game in games:
+            if not game.ingest_key:
+                game.ingest_key = secrets.token_urlsafe(24)
+            typer.echo(f"  #{game.id:<5} {game.ingest_key}  {game.name}")
+        session.commit()
+
+
+@app.command()
 def backfill(
     name: str = typer.Argument(..., help="Connector to backfill (e.g. applovin_max)"),
     days: int = typer.Option(45, help="How many days back"),

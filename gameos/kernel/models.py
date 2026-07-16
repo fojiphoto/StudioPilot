@@ -25,6 +25,7 @@ class Game(Base):
     genre: Mapped[str | None] = mapped_column(String(100))
     launch_date: Mapped[date | None] = mapped_column(Date)
     dev_cost: Mapped[float] = mapped_column(Float, default=0.0)  # manual entry, feeds P&L
+    ingest_key: Mapped[str | None] = mapped_column(String(64), unique=True)  # GameOS SDK auth per game
 
     __table_args__ = (UniqueConstraint("name", "store"),)
 
@@ -127,6 +128,38 @@ class PnLSnapshot(Base):
     dev_cost: Mapped[float] = mapped_column(Float, default=0.0)
     net: Mapped[float] = mapped_column(Float, default=0.0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Device(Base):
+    """One row per device per game - the backbone of our own analytics (DAU/retention).
+    Populated by the GameOS SDK via the collector endpoint."""
+
+    __tablename__ = "devices"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"), index=True)
+    device_id: Mapped[str] = mapped_column(String(128), index=True)
+    platform: Mapped[str | None] = mapped_column(String(20))
+    country: Mapped[str | None] = mapped_column(String(2))
+    first_seen: Mapped[date] = mapped_column(Date, index=True)  # install cohort date
+    last_seen: Mapped[date] = mapped_column(Date, index=True)
+
+    __table_args__ = (UniqueConstraint("game_id", "device_id"),)
+
+
+class SessionEvent(Base):
+    """Raw session/engagement events from the GameOS SDK. Rolled up into
+    GameMetricRecord by the engagement_metrics analyzer, then prunable."""
+
+    __tablename__ = "session_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"), index=True)
+    device_id: Mapped[str] = mapped_column(String(128), index=True)
+    event_type: Mapped[str] = mapped_column(String(30))  # install | session_start | session_end
+    date: Mapped[date] = mapped_column(Date, index=True)
+    duration_sec: Mapped[float] = mapped_column(Float, default=0.0)  # for session_end
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class SourceSync(Base):
