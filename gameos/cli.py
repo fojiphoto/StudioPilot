@@ -63,8 +63,12 @@ def test(name: str = typer.Argument(None, help="Module to self-test (omit for al
 
 @app.command()
 def report() -> None:
-    """Print current status: source freshness, recent alerts. (Grows with analyzers.)"""
-    from gameos.kernel.models import Alert, SourceSync
+    """Print current status: source freshness, ROAS, P&L, recent alerts."""
+    from datetime import date, timedelta
+
+    from sqlalchemy import func
+
+    from gameos.kernel.models import AdRevenueRecord, Alert, CampaignRecord, Game, PnLSnapshot, SourceSync
 
     engine = Engine()
     with engine.ctx.session() as session:
@@ -75,6 +79,51 @@ def report() -> None:
         for sync in syncs:
             note = f"  [{sync.freshness_note}]" if sync.freshness_note else ""
             typer.echo(f"  {sync.source:20} last ok: {sync.last_success_at}{note}")
+
+        since = date.today() - timedelta(days=6)
+        revenue = (
+            session.query(func.coalesce(func.sum(AdRevenueRecord.revenue), 0.0))
+            .filter(AdRevenueRecord.date >= since).scalar()
+        )
+        spend = (
+            session.query(func.coalesce(func.sum(CampaignRecord.spend), 0.0))
+            .filter(CampaignRecord.date >= since).scalar()
+        )
+        roas = f"{revenue / spend:.2f}" if spend else "n/a (no spend)"
+        typer.echo("== Last 7 days (portfolio) ==")
+        typer.echo(f"  revenue: ${revenue:,.2f}   spend: ${spend:,.2f}   ROAS: {roas}")
+
+        typer.echo("== P&L (lifetime*, top games by net) ==")
+        rows = (
+            session.query(PnLSnapshot, Game.name, Game.store)
+            .join(Game, Game.id == PnLSnapshot.game_id)
+            .filter(PnLSnapshot.period == "lifetime")
+            .order_by(PnLSnapshot.net.desc())
+            .limit(15)
+            .all()
+        )
+        if not rows:
+            typer.echo("  (no P&L snapshots yet - run a cycle first)")
+        for snap, name, store in rows:
+            typer.echo(
+                f"  {name[:34]:34} [{store:7}] rev ${snap.ad_revenue:9,.2f}  "
+                f"spend ${snap.spend:8,.2f}  dev ${snap.dev_cost:8,.2f}  net ${snap.net:9,.2f}"
+            )
+        totals = (
+            session.query(
+                func.coalesce(func.sum(PnLSnapshot.ad_revenue), 0.0),
+                func.coalesce(func.sum(PnLSnapshot.spend), 0.0),
+                func.coalesce(func.sum(PnLSnapshot.dev_cost), 0.0),
+                func.coalesce(func.sum(PnLSnapshot.net), 0.0),
+            )
+            .filter(PnLSnapshot.period == "lifetime")
+            .one()
+        )
+        typer.echo(
+            f"  {'PORTFOLIO':34} {'':9} rev ${totals[0]:9,.2f}  "
+            f"spend ${totals[1]:8,.2f}  dev ${totals[2]:8,.2f}  net ${totals[3]:9,.2f}"
+        )
+        typer.echo("  (*lifetime = since GameOS started collecting; historical backfill pending)")
 
         typer.echo("== Recent alerts ==")
         alerts = session.query(Alert).order_by(Alert.created_at.desc()).limit(20).all()

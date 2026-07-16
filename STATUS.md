@@ -17,11 +17,21 @@
 - **Mintegral connector live and verified with real data**: 7 campaign-day rows, 1 campaign (id 171784), $0 spend last 7d (campaigns currently paused; owner confirmed Mintegral is the active UA platform). API quirks documented in the module: md5(api_key + md5(timestamp)) token, async 201→poll→type=2 TSV fetch, 7-day max window, D-1 freshness.
 - `CampaignRecord.game_id` now nullable — campaigns arrive unmapped; campaign→game mapping step needed later (Mintegral Campaign dimension gives ids only, no names).
 
+### Done (part 5 — 2026-07-16)
+- **Meta long-lived token**: exchanged via fb_exchange_token (60 days), App ID/Secret in `.env`. TODO: auto-refresh module before day ~55.
+- **Google Ads**: owner created MCC + got Developer Token (`.env`), Customer ID `5024835248` (Cross Box Games). Access level is **Test Account** — owner must click "Apply for Basic Access" in API Center; until approved, production queries will fail (expected). OAuth for adwords scope FAILED with 403 access_denied: `crossboxgames00@gmail.com` is not a test user on the OAuth consent screen — owner is adding it (Google Auth Platform → Audience → Test users), then re-run `python scripts/google_oauth.py googleads`.
+- **Phase 4 started — analyzers live:**
+  - `roas_engine`: portfolio + per-game ROAS over rolling 7d; alerts on negative ROAS (with $5 min-spend threshold), unmapped-spend alert, 24h alert cooldown/dedupe.
+  - `pnl_engine`: lifetime PnLSnapshot per game (ad_rev + IAP − spend − dev_cost); dev_cost manual on Game rows. 252 games computed, portfolio net +$145.82 (revenue side only so far; spend last 7d = $0 since Mintegral campaigns paused).
+  - `gameos report` now shows: freshness, 7d portfolio ROAS, lifetime P&L top games + portfolio, alerts.
+- Caveat noted in code: "lifetime" = since GameOS started collecting. Historical backfill (MAX supports 45d query window) is a pending item.
+
 ### Next
-- Google Ads connector: waiting on owner for Developer Token (API Center in an MCC) + Customer ID; OAuth reuses `scripts/google_oauth.py googleads`.
-- Meta long-lived token: waiting on App ID + App Secret.
-- Then Phase 3 (Firebase/GameAnalytics) or jump to Phase 4 analyzers (ROAS/P&L) — revenue + spend data already flowing, analyzers are now buildable.
-- Note: local SQLite dev DB reset twice for schema changes (create_all doesn't migrate). Consider Alembic once schema stabilizes.
+- Google Ads: after owner adds test user → OAuth → build connector (GAQL searchStream). Data flows once Basic Access approved.
+- Campaign→game mapping mechanism (Mintegral campaign 171784 unmapped; CampaignRecord.game_id NULL).
+- Historical backfill for AppLovin MAX (45 days) so P&L means something.
+- Phase 5 outputs: Telegram alerts (needs bot token + chat id from owner).
+- Note: local SQLite dev DB reset twice for schema changes. Consider Alembic once schema stabilizes.
 
 ## 2026-07-15 — Session 1
 
