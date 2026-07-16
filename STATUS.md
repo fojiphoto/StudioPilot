@@ -47,8 +47,16 @@
 - **Telegram DROPPED** (banned in Pakistan, owner would need a VPN). Replaced with **WhatsApp Cloud API**: `whatsapp_alerts` output module delivers undelivered Alert rows, marks `delivered_via`, retries on failure. Waiting on owner: add WhatsApp product to their existing Meta app (1330394172615111) → send WHATSAPP_PHONE_NUMBER_ID + their number + token → fill WHATSAPP_* in `.env` → `gameos test whatsapp_alerts`.
 - **Read-only web dashboard** (`gameos dashboard --port 8080`, gameos/dashboard.py): FastAPI + Chart.js; cards (7d revenue/spend/ROAS, lifetime net, game count), 30d revenue-vs-spend line, top-games bar, lifetime P&L table, alerts, per-source freshness. Verified in browser against real data. Engine does NOT depend on it (SPEC 5.9).
 
-### Next
-- WhatsApp credentials from owner → test end-to-end alert delivery.
+### Done (part 10 — WhatsApp live)
+- **WhatsApp alerts verified end-to-end**: WhatsApp use case added to owner's Meta app, test number claimed (Phone Number ID 1229604573569755, WABA 998199606545076), owner's number verified as recipient, `gameos test whatsapp_alerts` delivered successfully. All WHATSAPP_* values in `.env`.
+- Dashboard got date-range controls: 1D/3D/7D/15D/30D/All presets + calendar pickers bounded to actual data range (/api/range).
+
+### Next / reminders
+- WhatsApp token from API Setup is TEMPORARY (~24h). For permanent: Business settings → System user → generate token with whatsapp_business_messaging, or regenerate from API Setup when it expires. Consider a token-health self-check.
+- 24h free-form window: owner should message the test number occasionally, or approve a template for anytime delivery.
+- Google Ads Basic Access pending (~5 days) → then `gameos backfill google_ads --days 45`.
+- Meta ads token expires ~2026-09-14 (60d) — auto-refresh module still todo.
+- Game dedup by package_name (Wordall duplicates); Windows service setup; Dockerfile.
 - Game dedup/merge: AdMob and MAX register the same game under different names (e.g. "Wordall: Daily Word Test" vs "Wordall - Daily Word Test Game") — merge by package_name where possible.
 - Meta token auto-refresh module (60d expiry, exchanged 2026-07-16).
 - When Google Ads Basic Access approves: `gameos test google_ads` then `gameos backfill google_ads --days 45`.
