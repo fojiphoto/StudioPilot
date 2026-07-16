@@ -25,3 +25,6 @@ logs/
 Thumbs.db
 .vscode/
 .idea/
+
+# Local business docs (not for the public repo)
+docs/GameOS-GoogleAds-API-Design.pdf
