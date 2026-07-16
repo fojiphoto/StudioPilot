@@ -27,16 +27,15 @@ Now edit `.env` and fill in:
 - `DOMAIN=gameos.yourdomain.com`
 - `POSTGRES_PASSWORD=` any strong password
 - `DASHBOARD_USER=` a login name for the portal
-- `DASHBOARD_PASS_HASH=` generate with:
-  ```bash
-  docker run --rm caddy:2-alpine caddy hash-password --plaintext 'YOUR_PORTAL_PASSWORD'
-  ```
-  Paste the hash it prints.
+(No hash needed in `.env` — the portal password is set in the next step.)
 
-## 4. Launch
+## 4. Render the Caddyfile, then launch
 ```bash
+bash deploy/setup-caddy.sh 'YOUR_PORTAL_PASSWORD'   # reads DOMAIN + DASHBOARD_USER from .env
 docker compose up -d --build
 ```
+`setup-caddy.sh` writes a local `Caddyfile` (gitignored) with your domain, portal user
+and the hashed password inlined. Re-run it if you change the domain or password.
 That starts: Postgres, the engine (pulls + analyzes every 10 min), the collector, the
 portal, and Caddy (which gets a free HTTPS certificate for your domain automatically).
 

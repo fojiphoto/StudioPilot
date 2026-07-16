@@ -1,0 +1,17 @@
+# Template - deploy/setup-caddy.sh renders this into ../Caddyfile with real values.
+# The password hash is inlined (not an env var) because its $ chars break
+# docker-compose interpolation.
+__DOMAIN__ {
+	handle /collect* {
+		reverse_proxy collector:8090
+	}
+	handle /health {
+		reverse_proxy collector:8090
+	}
+	handle {
+		basic_auth {
+			__USER__ __HASH__
+		}
+		reverse_proxy dashboard:8080
+	}
+}

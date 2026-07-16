@@ -28,3 +28,4 @@ Thumbs.db
 
 # Local business docs (not for the public repo)
 docs/GameOS-GoogleAds-API-Design.pdf
+/Caddyfile

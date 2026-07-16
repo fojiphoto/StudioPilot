@@ -83,8 +83,9 @@
 - **Server IP, URL, SSH key, portal login — NOT in this repo (it's public). They live only in local auto-memory `gameos-vps-deployment` and the server's gitignored `.env`.**
 - Fixes applied live: 2GB swap added (RAM tight); Caddyfile rewritten multi-line (single-line blocks failed); proxy env `$`-hash issue avoided by inlining hash in Caddyfile.
 
-### Not yet committed to repo (server has them, repo doesn't)
-- The multi-line Caddyfile fix and proxy compose tweak were done ON THE SERVER only. Repo's Caddyfile still has the single-line-block bug + env-based hash. **Fix repo Caddyfile/compose next session** so a fresh `git pull` deploy works cleanly.
+### Repo deploy is now reproducible (fixed)
+- Caddyfile is no longer tracked (gitignored). `deploy/Caddyfile.template` + `deploy/setup-caddy.sh 'password'` render a local `Caddyfile` with domain/user/inlined-hash. compose proxy just mounts it. This avoids the `$`-in-bcrypt vs compose-interpolation problem that broke env-based auth.
+- Server currently runs a hand-inlined Caddyfile (auth verified 200). Server's Caddyfile is gitignored, so future `git pull && docker compose up -d --build` won't clobber it. If domain/password changes, re-run `deploy/setup-caddy.sh`.
 
 ### Blocked on owner (optional / later)
 - Point `gameos.factorialstudio.com` A record → server IP (host's Zone Editor), then swap DOMAIN. rDNS hostname works fine until then.

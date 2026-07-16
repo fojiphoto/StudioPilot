@@ -64,9 +64,8 @@ services:
     ports:
       - "80:80"
       - "443:443"
-    # env_file (not `environment: ${...}`) so the bcrypt hash's $ chars reach Caddy
-    # verbatim instead of being mangled by compose interpolation.
-    env_file: .env
+    # Caddyfile is rendered with literal values by deploy/setup-caddy.sh
+    # (the bcrypt hash's $ chars can't survive compose interpolation as env vars).
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddydata:/data
