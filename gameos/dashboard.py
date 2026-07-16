@@ -14,7 +14,7 @@ from sqlalchemy import func
 from gameos.kernel import db
 from gameos.kernel.config import load_settings
 from gameos.kernel.models import (
-    AdRevenueRecord, Alert, CampaignRecord, Game, PnLSnapshot, SourceSync,
+    AdRevenueRecord, Alert, CampaignRecord, Game, GameMetricRecord, PnLSnapshot, SourceSync,
 )
 
 app = FastAPI(title="GameOS Dashboard", docs_url=None, redoc_url=None)
@@ -78,15 +78,97 @@ def top_games(start: str | None = None, end: str | None = None, limit: int = 12)
     start_date, end_date = _range(start, end)
     with session_factory()() as s:
         rows = (
-            s.query(Game.name, Game.store, func.sum(AdRevenueRecord.revenue).label("rev"))
+            s.query(Game.id, Game.name, Game.store, func.sum(AdRevenueRecord.revenue).label("rev"))
             .join(Game, Game.id == AdRevenueRecord.game_id)
             .filter(AdRevenueRecord.date >= start_date, AdRevenueRecord.date <= end_date)
             .group_by(Game.id).order_by(func.sum(AdRevenueRecord.revenue).desc())
             .limit(limit).all()
         )
     return {
-        "labels": [f"{name[:26]} [{store}]" for name, store, _ in rows],
-        "revenue": [round(float(rev or 0), 2) for _, _, rev in rows],
+        "ids": [game_id for game_id, _, _, _ in rows],
+        "labels": [f"{name[:26]} [{store}]" for _, name, store, _ in rows],
+        "revenue": [round(float(rev or 0), 2) for _, _, _, rev in rows],
+    }
+
+
+@app.get("/api/game/{game_id}")
+def game_detail(game_id: int, start: str | None = None, end: str | None = None):
+    """Everything the per-game page needs: daily revenue/spend/DAU/MAU/ARPDAU/ARPMAU,
+    playtime and retention. Metric fields are null until an analytics source
+    (GameAnalytics / Firebase) is connected - the charts show what exists."""
+    start_date, end_date = _range(start, end)
+    with session_factory()() as s:
+        game = s.get(Game, game_id)
+        if game is None:
+            return {"error": "no such game"}
+        revenue = dict(
+            s.query(AdRevenueRecord.date, func.sum(AdRevenueRecord.revenue))
+            .filter(AdRevenueRecord.game_id == game_id,
+                    AdRevenueRecord.date >= start_date, AdRevenueRecord.date <= end_date)
+            .group_by(AdRevenueRecord.date).all()
+        )
+        spend = dict(
+            s.query(CampaignRecord.date, func.sum(CampaignRecord.spend))
+            .filter(CampaignRecord.game_id == game_id,
+                    CampaignRecord.date >= start_date, CampaignRecord.date <= end_date)
+            .group_by(CampaignRecord.date).all()
+        )
+        # country=NULL rows are the per-game daily rollup; country rows come later
+        metrics = {
+            m.date: m
+            for m in s.query(GameMetricRecord)
+            .filter(GameMetricRecord.game_id == game_id, GameMetricRecord.country.is_(None),
+                    GameMetricRecord.date >= start_date, GameMetricRecord.date <= end_date)
+            .all()
+        }
+        networks = (
+            s.query(AdRevenueRecord.network, func.sum(AdRevenueRecord.revenue))
+            .filter(AdRevenueRecord.game_id == game_id,
+                    AdRevenueRecord.date >= start_date, AdRevenueRecord.date <= end_date)
+            .group_by(AdRevenueRecord.network)
+            .order_by(func.sum(AdRevenueRecord.revenue).desc()).limit(10).all()
+        )
+
+    days_list = [start_date + timedelta(days=i) for i in range((end_date - start_date).days + 1)]
+
+    def metric(day, attr):
+        m = metrics.get(day)
+        value = getattr(m, attr) if m else None
+        return value if value not in (None, 0) else None
+
+    daily_revenue = [round(float(revenue.get(d, 0) or 0), 2) for d in days_list]
+    daily_dau = [metric(d, "dau") for d in days_list]
+    daily_mau = [metric(d, "mau") for d in days_list]
+    return {
+        "game": {"id": game.id, "name": game.name, "store": game.store,
+                 "package": game.package_name, "dev_cost": game.dev_cost},
+        "labels": [d.isoformat() for d in days_list],
+        "revenue": daily_revenue,
+        "spend": [round(float(spend.get(d, 0) or 0), 2) for d in days_list],
+        "dau": daily_dau,
+        "mau": daily_mau,
+        "arpdau": [
+            round(r / u, 4) if (u and u > 0) else None
+            for r, u in zip(daily_revenue, daily_dau)
+        ],
+        "arpmau": [
+            round(r / u, 4) if (u and u > 0) else None
+            for r, u in zip(daily_revenue, daily_mau)
+        ],
+        "avg_playtime_min": [
+            round(metric(d, "avg_playtime") / 60, 1) if metric(d, "avg_playtime") else None
+            for d in days_list
+        ],
+        "retention": {
+            "d1": [metric(d, "retention_d1") for d in days_list],
+            "d7": [metric(d, "retention_d7") for d in days_list],
+            "d30": [metric(d, "retention_d30") for d in days_list],
+        },
+        "networks": {
+            "labels": [n or "unknown" for n, _ in networks],
+            "revenue": [round(float(r or 0), 2) for _, r in networks],
+        },
+        "has_metrics": any(v is not None for v in daily_dau),
     }
 
 
@@ -241,12 +323,19 @@ async function loadRange(start, end) {
       x:{ticks:{color:'#8a8f98', maxTicksLimit:10}, grid:{color:'#23262e'}},
       y:{ticks:{color:'#8a8f98'}, grid:{color:'#23262e'}}}}});
 
-  if (topChart) { topChart.data.labels = t.labels; topChart.data.datasets[0].data = t.revenue; topChart.update(); }
-  else topChart = new Chart($('top'), { type:'bar', data:{ labels:t.labels, datasets:[
+  if (topChart) { topChart.data.labels = t.labels; topChart.data.datasets[0].data = t.revenue;
+    topChart.gameIds = t.ids; topChart.update(); }
+  else { topChart = new Chart($('top'), { type:'bar', data:{ labels:t.labels, datasets:[
       {label:'Revenue', data:t.revenue, backgroundColor:'#60a5fa'}]},
-    options:{ indexAxis:'y', plugins:{legend:{display:false}}, scales:{
+    options:{ indexAxis:'y', plugins:{legend:{display:false}},
+      onClick: (evt, els) => { if (els.length) {
+        const id = topChart.gameIds[els[0].index];
+        window.location = `/game/${id}?start=${$('from').value}&end=${$('to').value}`; } },
+      onHover: (evt, els) => { evt.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+      scales:{
       x:{ticks:{color:'#8a8f98'}, grid:{color:'#23262e'}},
       y:{ticks:{color:'#8a8f98'}, grid:{display:false}}}}});
+    topChart.gameIds = t.ids; }
 
   $('from').value = start; $('to').value = end;
 }
@@ -298,3 +387,161 @@ function presetRange(days) {
 @app.get("/", response_class=HTMLResponse)
 def index():
     return PAGE
+
+
+GAME_PAGE = """<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GameOS - Game</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; font-family: system-ui, sans-serif; background:#0f1115; color:#e6e6e6; }
+  header { padding:16px 24px; border-bottom:1px solid #23262e; display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }
+  header h1 { margin:0; font-size:20px; } header span { color:#8a8f98; font-size:13px; }
+  header a { color:#60a5fa; text-decoration:none; font-size:13px; }
+  .wrap { padding:20px 24px; max-width:1100px; margin:0 auto; }
+  .toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:16px; }
+  .toolbar button { background:#161a22; border:1px solid #23262e; color:#e6e6e6; border-radius:8px;
+    padding:6px 14px; cursor:pointer; font-size:13px; }
+  .toolbar button.active { background:#1d4ed8; border-color:#1d4ed8; color:#fff; }
+  .toolbar input[type=date] { background:#161a22; border:1px solid #23262e; color:#e6e6e6;
+    border-radius:8px; padding:5px 8px; font-size:13px; }
+  .toolbar .sep { color:#8a8f98; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }
+  .card { background:#161a22; border:1px solid #23262e; border-radius:10px; padding:14px 16px; }
+  .card .k { color:#8a8f98; font-size:12px; text-transform:uppercase; letter-spacing:.05em; }
+  .card .v { font-size:22px; font-weight:600; margin-top:4px; }
+  .pos { color:#4ade80; } .neg { color:#f87171; }
+  .panel { background:#161a22; border:1px solid #23262e; border-radius:10px; padding:16px; margin-top:16px; }
+  .panel h2 { margin:0 0 10px; font-size:14px; color:#8a8f98; font-weight:600; text-transform:uppercase; letter-spacing:.05em; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media (max-width:800px) { .grid2 { grid-template-columns:1fr; } }
+  .note { background:#1c2230; border:1px solid #2b3448; color:#9db4dd; border-radius:10px;
+    padding:12px 16px; margin-top:16px; font-size:13px; }
+  canvas { max-height:260px; }
+  .muted { color:#8a8f98; font-size:12px; }
+</style></head><body>
+<header><a href="/">&larr; portfolio</a><h1 id="title">...</h1><span id="subtitle"></span></header>
+<div class="wrap">
+  <div class="toolbar" id="toolbar">
+    <button data-days="7">7D</button>
+    <button data-days="15">15D</button>
+    <button data-days="30" class="active">30D</button>
+    <button data-days="all">All</button>
+    <span class="sep">|</span>
+    <input type="date" id="from"> <span class="sep">to</span> <input type="date" id="to">
+  </div>
+  <div class="cards" id="cards"></div>
+  <div id="metricsNote" class="note" style="display:none">
+    DAU / MAU / retention / playtime abhi khali hain &mdash; analytics source (GameAnalytics ya Firebase)
+    connect hote hi yeh charts khud bhar jayenge. Revenue/spend data live hai.
+  </div>
+  <div class="panel"><h2>Revenue vs Spend</h2><canvas id="revspend"></canvas></div>
+  <div class="grid2">
+    <div class="panel"><h2>DAU / MAU</h2><canvas id="users"></canvas></div>
+    <div class="panel"><h2>ARPDAU / ARPMAU ($)</h2><canvas id="arpu"></canvas></div>
+    <div class="panel"><h2>Retention % (D1 / D7 / D30)</h2><canvas id="retention"></canvas></div>
+    <div class="panel"><h2>Avg playtime (minutes)</h2><canvas id="playtime"></canvas></div>
+  </div>
+  <div class="panel"><h2>Revenue by network</h2><canvas id="networks"></canvas></div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const usd = (v) => '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+async function j(url) { return (await fetch(url)).json(); }
+const gameId = window.location.pathname.split('/').pop();
+const qs = new URLSearchParams(window.location.search);
+let bounds = null; const charts = {};
+
+const GRID = {color:'#23262e'}, TICKS = {color:'#8a8f98'};
+function lineOpts(extra) { return Object.assign({ plugins:{legend:{labels:{color:'#e6e6e6'}}},
+  spanGaps:true, scales:{ x:{ticks:Object.assign({maxTicksLimit:10},TICKS), grid:GRID},
+  y:{ticks:TICKS, grid:GRID}}}, extra||{}); }
+
+function upsert(id, type, data, options) {
+  if (charts[id]) { charts[id].data = data; charts[id].update(); return; }
+  charts[id] = new Chart($(id), {type, data, options});
+}
+
+async function load(start, end) {
+  const d = await j(`/api/game/${gameId}?start=${start}&end=${end}`);
+  if (d.error) { document.body.innerHTML = '<p style="padding:40px">' + d.error + '</p>'; return; }
+  $('title').textContent = d.game.name;
+  $('subtitle').textContent = `${d.game.store}${d.game.package ? ' - ' + d.game.package : ''}`;
+  document.title = 'GameOS - ' + d.game.name;
+  $('from').value = start; $('to').value = end;
+  $('metricsNote').style.display = d.has_metrics ? 'none' : 'block';
+
+  const sum = (a) => a.reduce((x, y) => x + (y || 0), 0);
+  const totRev = sum(d.revenue), totSpend = sum(d.spend);
+  const roas = totSpend > 0 ? (totRev / totSpend) : null;
+  const lastNonNull = (a) => { for (let i = a.length - 1; i >= 0; i--) if (a[i] !== null && a[i] !== undefined) return a[i]; return null; };
+  const dau = lastNonNull(d.dau), arpdau = lastNonNull(d.arpdau);
+  $('cards').innerHTML = `
+    <div class="card"><div class="k">Revenue</div><div class="v">${usd(totRev)}</div></div>
+    <div class="card"><div class="k">Spend</div><div class="v">${usd(totSpend)}</div></div>
+    <div class="card"><div class="k">ROAS</div><div class="v ${roas===null?'':(roas>=1?'pos':'neg')}">${roas===null?'n/a':roas.toFixed(2)}</div></div>
+    <div class="card"><div class="k">DAU (latest)</div><div class="v">${dau ?? '-'}</div></div>
+    <div class="card"><div class="k">ARPDAU (latest)</div><div class="v">${arpdau !== null ? '$'+arpdau : '-'}</div></div>
+    <div class="card"><div class="k">Dev cost</div><div class="v">${usd(d.game.dev_cost || 0)}</div></div>`;
+
+  upsert('revspend', 'line', { labels:d.labels, datasets:[
+    {label:'Revenue', data:d.revenue, borderColor:'#4ade80', backgroundColor:'transparent', tension:.25},
+    {label:'Spend', data:d.spend, borderColor:'#f87171', backgroundColor:'transparent', tension:.25}]},
+    lineOpts());
+  upsert('users', 'line', { labels:d.labels, datasets:[
+    {label:'DAU', data:d.dau, borderColor:'#60a5fa', backgroundColor:'transparent', tension:.25},
+    {label:'MAU', data:d.mau, borderColor:'#c084fc', backgroundColor:'transparent', tension:.25}]},
+    lineOpts());
+  upsert('arpu', 'line', { labels:d.labels, datasets:[
+    {label:'ARPDAU', data:d.arpdau, borderColor:'#fbbf24', backgroundColor:'transparent', tension:.25},
+    {label:'ARPMAU', data:d.arpmau, borderColor:'#f472b6', backgroundColor:'transparent', tension:.25}]},
+    lineOpts());
+  upsert('retention', 'line', { labels:d.labels, datasets:[
+    {label:'D1', data:d.retention.d1, borderColor:'#4ade80', backgroundColor:'transparent', tension:.25},
+    {label:'D7', data:d.retention.d7, borderColor:'#60a5fa', backgroundColor:'transparent', tension:.25},
+    {label:'D30', data:d.retention.d30, borderColor:'#c084fc', backgroundColor:'transparent', tension:.25}]},
+    lineOpts());
+  upsert('playtime', 'line', { labels:d.labels, datasets:[
+    {label:'Avg playtime (min)', data:d.avg_playtime_min, borderColor:'#34d399', backgroundColor:'transparent', tension:.25}]},
+    lineOpts());
+  upsert('networks', 'bar', { labels:d.networks.labels, datasets:[
+    {label:'Revenue', data:d.networks.revenue, backgroundColor:'#60a5fa'}]},
+    { indexAxis:'y', plugins:{legend:{display:false}},
+      scales:{ x:{ticks:TICKS, grid:GRID}, y:{ticks:TICKS, grid:{display:false}} } });
+}
+
+function presetRange(days) {
+  const end = bounds.max;
+  if (days === 'all') return [bounds.min, end];
+  const e = new Date(end + 'T00:00:00Z');
+  const s = new Date(e); s.setUTCDate(e.getUTCDate() - (days - 1));
+  const minD = new Date(bounds.min + 'T00:00:00Z');
+  return [(s < minD ? minD : s).toISOString().slice(0,10), end];
+}
+
+(async () => {
+  bounds = await j('/api/range');
+  $('from').min = bounds.min; $('from').max = bounds.max;
+  $('to').min = bounds.min; $('to').max = bounds.max;
+  document.querySelectorAll('#toolbar button').forEach(btn => btn.addEventListener('click', () => {
+    document.querySelectorAll('#toolbar button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const v = btn.dataset.days;
+    const [s, e] = presetRange(v === 'all' ? 'all' : parseInt(v));
+    load(s, e);
+  }));
+  const onDate = () => { if ($('from').value && $('to').value) {
+    document.querySelectorAll('#toolbar button').forEach(b => b.classList.remove('active'));
+    load($('from').value, $('to').value); } };
+  $('from').addEventListener('change', onDate); $('to').addEventListener('change', onDate);
+  const start = qs.get('start'), end = qs.get('end');
+  if (start && end) load(start, end); else { const [s, e] = presetRange(30); load(s, e); }
+})();
+</script></body></html>"""
+
+
+@app.get("/game/{game_id}", response_class=HTMLResponse)
+def game_page(game_id: int):
+    return GAME_PAGE

@@ -70,6 +70,7 @@ class GameMetricRecord(Base):
     date: Mapped[date] = mapped_column(Date, index=True)
     country: Mapped[str | None] = mapped_column(String(2))
     dau: Mapped[int] = mapped_column(Integer, default=0)
+    mau: Mapped[int] = mapped_column(Integer, default=0)  # rolling 30d actives as of `date`
     avg_playtime: Mapped[float] = mapped_column(Float, default=0.0)  # seconds
     retention_d1: Mapped[float | None] = mapped_column(Float)
     retention_d7: Mapped[float | None] = mapped_column(Float)

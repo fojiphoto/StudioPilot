@@ -51,7 +51,15 @@
 - **WhatsApp alerts verified end-to-end**: WhatsApp use case added to owner's Meta app, test number claimed (Phone Number ID 1229604573569755, WABA 998199606545076), owner's number verified as recipient, `gameos test whatsapp_alerts` delivered successfully. All WHATSAPP_* values in `.env`.
 - Dashboard got date-range controls: 1D/3D/7D/15D/30D/All presets + calendar pickers bounded to actual data range (/api/range).
 
+### Done (part 11 — Phase 3 groundwork: per-game analytics infrastructure)
+- Owner confirmed: **GameAnalytics is on ALL games** (mandatory), Firebase only on Google Play/iOS builds (never Amazon — no Google products there). Plan: GA = primary metrics source, Firebase = supplement for GP/iOS.
+- **GameAnalytics Metrics API is a PRO (paid, PipelineIQ) feature** — not on owner's plan. Owner asking GA sales/support for pricing. Plan B if too expensive: Firebase/BigQuery (free) for GP/iOS now; Amazon games stay revenue-only until GA is resolved.
+- `GameMetricRecord.mau` column added (empty table dropped/recreated).
+- **Dashboard per-game drill-down** (`/game/{id}` + `/api/game/{id}`): revenue-vs-spend, DAU/MAU, **ARPDAU/ARPMAU (computed as revenue ÷ DAU/MAU)**, retention D1/D7/D30, avg playtime, revenue-by-network — all with the same range presets/calendar. Top-games bar chart is click-through. Metric charts show a friendly note until an analytics connector lands (revenue/spend live already). Verified in browser on game 22.
+
 ### Next / reminders
+- GameAnalytics pricing answer from owner → build `gameanalytics` connector (metrics.gameanalytics.com, X-API-Key) filling GameMetricRecord (dau/mau/retention/playtime + cohort LTV).
+- If GA too costly → Firebase BigQuery connector first (needs: Firebase console → project settings → Integrations → BigQuery ON per project + service account JSON).
 - WhatsApp token from API Setup is TEMPORARY (~24h). For permanent: Business settings → System user → generate token with whatsapp_business_messaging, or regenerate from API Setup when it expires. Consider a token-health self-check.
 - 24h free-form window: owner should message the test number occasionally, or approve a template for anytime delivery.
 - Google Ads Basic Access pending (~5 days) → then `gameos backfill google_ads --days 45`.
