@@ -1,0 +1,82 @@
+# GameOS full stack for a VPS: Postgres + engine + collector + dashboard + HTTPS proxy.
+# One shared Postgres DB (SQLite can't take concurrent writes from 3 processes).
+#
+#   cp .env.example .env   # fill in real values + POSTGRES_PASSWORD + DASHBOARD_USER/PASS + DOMAIN
+#   docker compose up -d --build
+#
+# Games POST events to  https://<DOMAIN>/collect  (public, per-game ingest key).
+# You view the portal at https://<DOMAIN>/  (HTTP basic auth).
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: gameos
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: gameos
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gameos"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  engine:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      GAMEOS_DB_URL: postgresql+psycopg://gameos:${POSTGRES_PASSWORD}@db/gameos
+      GAMEOS_MODE: interval
+      GAMEOS_INTERVAL_MINUTES: 10
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["gameos", "run"]
+
+  collector:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      GAMEOS_DB_URL: postgresql+psycopg://gameos:${POSTGRES_PASSWORD}@db/gameos
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["gameos", "collect", "--host", "0.0.0.0", "--port", "8090"]
+
+  dashboard:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      GAMEOS_DB_URL: postgresql+psycopg://gameos:${POSTGRES_PASSWORD}@db/gameos
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["gameos", "dashboard", "--host", "0.0.0.0", "--port", "8080"]
+
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+      DASHBOARD_USER: ${DASHBOARD_USER}
+      DASHBOARD_PASS_HASH: ${DASHBOARD_PASS_HASH}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    depends_on:
+      - dashboard
+      - collector
+
+volumes:
+  pgdata:
+  caddydata:
+  caddyconfig:

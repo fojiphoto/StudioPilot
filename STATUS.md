@@ -68,8 +68,18 @@
   - VERIFIED: simulated 30 days / 9,442 events / 620 devices → DAU/MAU/retention computed correctly (retention matched the 40% sim return-rate). Test data then purged from game 22.
 - Dashboard per-game page already renders these (built part 11).
 
+### Done (part 13 — VPS deployment stack)
+- Dockerized full stack: `Dockerfile`, `docker-compose.yml` (Postgres + engine + collector + dashboard + Caddy HTTPS proxy), `Caddyfile` (auto-TLS; `/collect` public to collector, everything else = portal behind HTTP basic auth), `DEPLOY.md` step-by-step.
+- Switched cloud DB to Postgres (3 processes can't share SQLite); `psycopg[binary]` added; `GAMEOS_DB_URL` already supported it.
+- Portal auth: Caddy basic_auth (DASHBOARD_USER + hashed pass) so the public portal isn't open. Collector stays public but is protected by per-game ingest keys.
+- Compose YAML validated. Docker not installed locally (fine — builds on VPS).
+
+### Blocked on owner
+- **Buy a VPS (~$5/mo, 2GB) + point a domain/subdomain at it.** Then follow DEPLOY.md (or hand me SSH access and I'll deploy). This unlocks: 24/7 engine, public SDK collector, and the portal reachable from phone/anywhere.
+
 ### Next / reminders
-- Wire collector + engagement_metrics to auto-start inside the engine (currently `gameos collect` is separate). Then deploy on the VPS so games can reach it 24/7.
+- After VPS is up: backfill into cloud Postgres, `gameos ingest-key --all`, instrument a pilot Amazon game with GameOSAnalytics.cs pointing at https://<domain>/collect.
+- Wire collector + engagement_metrics to auto-start inside the engine (currently separate compose services — fine for VPS, but a single-process mode would help local runs).
 - Owner action for SDK: pick a pilot game, add GameOSAnalytics.cs, set endpoint (needs VPS/domain) + ingest key, publish update. Amazon games first.
 - **Firebase/BigQuery connector** (parallel track, free, GP/iOS): owner enables BigQuery export per Firebase project (~48h) + service-account JSON → build connector against GA4 `events_*` schema → same GameMetricRecord.
 - GameAnalytics paid Metrics API price: still worth asking for instant coverage of existing installed base.
