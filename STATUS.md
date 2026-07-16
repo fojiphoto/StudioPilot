@@ -33,12 +33,20 @@
 - Google Ads API Basic Access application: form filled + design doc PDF generated at `docs/GameOS-GoogleAds-API-Design.pdf` (LOCAL ONLY, gitignored — contains business figures). NOTE: form's Q2 was answered with old project number 630236845603; actual project is now 301924103303 — update Google if review asks.
 - Blocker for google_ads self-test: **Google Ads API not enabled in project 301924103303** — owner given direct enable link. After that, expect DEVELOPER_TOKEN_NOT_APPROVED until Basic Access approves (~5 business days).
 
+### Done (part 7 — backfill + mapping infrastructure)
+- Google Ads API enabled in project 301924103303; `gameos test google_ads` now returns the expected "developer token not approved" (= wiring verified; waiting on Basic Access, ~5 business days).
+- **Backfill implemented** (`gameos backfill <module> --days 45`): Module.backfill contract; MAX capped at its 45-day window; Mintegral walks 7-day chunks; AdMob straight range.
+- **45 days ingested**: MAX 59,088 rows + AdMob 7,671 rows + Mintegral 45 campaign-day rows. Portfolio: **$2,262.21 revenue / 45d across 471 games (~$50/day)**. Mintegral spend last 45d only $0.34 (campaigns effectively idle; Google Ads history — $354 lifetime — will arrive once Basic Access approves).
+- **Campaign→game mapping**: `CampaignMap` table; UA connectors (meta/mintegral/google) consult it on every pull; CLI: `gameos games [search]`, `gameos campaigns`, `gameos map <platform> <campaign_id> <game_id>` (updates existing rows too). Mintegral campaign 171784 ($0.34) still unmapped — need owner to say which game it is.
+- ADMOB_PUBLISHER_ID pinned to pub-8035849541939283.
+
 ### Next
-- Confirm Google Ads API enabled → re-run `gameos test google_ads` (expect token-not-approved message = wiring OK).
-- Campaign→game mapping mechanism (Mintegral campaign 171784 unmapped).
-- Historical backfill for AppLovin MAX (45 days) + AdMob so P&L means something.
-- Phase 5 outputs: Telegram alerts (needs bot token + chat id from owner).
-- Watch for: AdMob and MAX may register the same game under slightly different names (e.g. "Wordall: Daily Word Test" vs "Wordall - Daily Word Test Game") — game dedup/merge by package_name needed.
+- Phase 5 outputs: Telegram alerts module (needs bot token + chat id from owner — @BotFather).
+- Ask owner which game Mintegral campaign 171784 belongs to → `gameos map mintegral 171784 <game_id>`.
+- Game dedup/merge: AdMob and MAX register the same game under different names (e.g. "Wordall: Daily Word Test" vs "Wordall - Daily Word Test Game") — merge by package_name where possible.
+- Meta token auto-refresh module (60d expiry, exchanged 2026-07-16).
+- When Google Ads Basic Access approves: `gameos test google_ads` then `gameos backfill google_ads --days 45`.
+- Windows service setup (run `gameos run --mode interval` persistently) + Dockerfile for later VPS.
 - Note: local SQLite dev DB reset twice for schema changes. Consider Alembic once schema stabilizes.
 
 ## 2026-07-15 — Session 1

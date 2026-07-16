@@ -17,7 +17,7 @@ from datetime import date, timedelta
 
 import httpx
 
-from gameos.kernel.models import CampaignRecord
+from gameos.kernel.models import CampaignMap, CampaignRecord
 from gameos.kernel.module import Module, ModuleInfo, ModuleType
 from gameos.kernel.runtime import Context
 
@@ -117,6 +117,12 @@ class GoogleAds(Module):
         rows = self._fetch(start, end)
         self.log.info("google ads returned %d campaign-day rows for %s..%s", len(rows), start, end)
 
+        with ctx.session() as session:
+            mapping = dict(
+                session.query(CampaignMap.campaign_id, CampaignMap.game_id)
+                .filter(CampaignMap.ua_platform == "google")
+                .all()
+            )
         records = []
         for row in rows:
             campaign = row.get("campaign", {})
@@ -124,12 +130,13 @@ class GoogleAds(Module):
             segments = row.get("segments", {})
             spend = float(metrics.get("costMicros") or 0) / 1_000_000
             installs = int(float(metrics.get("conversions") or 0))
+            campaign_id = str(campaign.get("id"))
             records.append(
                 CampaignRecord(
-                    game_id=None,
+                    game_id=mapping.get(campaign_id),
                     date=date.fromisoformat(segments["date"]),
                     ua_platform="google",
-                    campaign_id=str(campaign.get("id")),
+                    campaign_id=campaign_id,
                     campaign_name=campaign.get("name"),
                     spend=spend,
                     installs=installs,

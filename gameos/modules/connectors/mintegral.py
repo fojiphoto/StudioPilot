@@ -19,7 +19,7 @@ from datetime import date, timedelta
 
 import httpx
 
-from gameos.kernel.models import CampaignRecord
+from gameos.kernel.models import CampaignMap, CampaignRecord
 from gameos.kernel.module import Module, ModuleInfo, ModuleType
 from gameos.kernel.runtime import Context
 
@@ -104,10 +104,30 @@ class Mintegral(Module):
 
     def run(self, ctx: Context) -> None:
         end = date.today() - timedelta(days=1)  # D-1: today's data doesn't exist yet
-        start = end - timedelta(days=PULL_DAYS - 1)
+        self._ingest(ctx, end - timedelta(days=PULL_DAYS - 1), end)
+
+    def backfill(self, ctx: Context, days: int) -> str:
+        """API allows 7 days per request - walk backwards in 7-day chunks."""
+        end = date.today() - timedelta(days=1)
+        start = end - timedelta(days=days - 1)
+        total = 0
+        chunk_end = end
+        while chunk_end >= start:
+            chunk_start = max(start, chunk_end - timedelta(days=6))
+            total += self._ingest(ctx, chunk_start, chunk_end)
+            chunk_end = chunk_start - timedelta(days=1)
+        return f"backfilled {total} rows over {days} days ({start}..{end})"
+
+    def _ingest(self, ctx: Context, start: date, end: date) -> int:
         rows = self._fetch(start, end)
         self.log.info("mintegral returned %d campaign-day rows for %s..%s", len(rows), start, end)
 
+        with ctx.session() as session:
+            mapping = dict(
+                session.query(CampaignMap.campaign_id, CampaignMap.game_id)
+                .filter(CampaignMap.ua_platform == "mintegral")
+                .all()
+            )
         records = []
         for row in rows:
             raw_date = row.get("date", "")
@@ -115,12 +135,13 @@ class Mintegral(Module):
                 continue
             spend = float(row.get("spend") or 0.0)
             installs = int(float(row.get("conversion") or 0))
+            campaign_id = str(row.get("campaign_id", ""))
             records.append(
                 CampaignRecord(
-                    game_id=None,
+                    game_id=mapping.get(campaign_id),
                     date=date(int(raw_date[:4]), int(raw_date[4:6]), int(raw_date[6:8])),
                     ua_platform="mintegral",
-                    campaign_id=str(row.get("campaign_id", "")),
+                    campaign_id=campaign_id,
                     campaign_name=None,  # Campaign dimension returns ids only
                     spend=spend,
                     installs=installs,
@@ -141,6 +162,7 @@ class Mintegral(Module):
 
         ctx.mark_synced("mintegral", freshness_note="D-1 (lands ~1.5h after day end)")
         self.log.info("stored %d CampaignRecord rows", len(records))
+        return len(records)
 
     def self_test(self, ctx: Context) -> tuple[bool, str]:
         try:

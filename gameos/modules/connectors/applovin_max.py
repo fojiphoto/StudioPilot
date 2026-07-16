@@ -68,7 +68,16 @@ class AppLovinMax(Module):
 
     def run(self, ctx: Context) -> None:
         end = date.today()
-        start = end - timedelta(days=PULL_DAYS - 1)
+        self._ingest(ctx, end - timedelta(days=PULL_DAYS - 1), end)
+
+    def backfill(self, ctx: Context, days: int) -> str:
+        days = min(days, 45)  # MAX report API window limit
+        end = date.today()
+        start = end - timedelta(days=days - 1)
+        count = self._ingest(ctx, start, end)
+        return f"backfilled {count} rows over {days} days ({start}..{end})"
+
+    def _ingest(self, ctx: Context, start: date, end: date) -> int:
         rows = self._fetch(start, end)
         self.log.info("MAX returned %d rows for %s..%s", len(rows), start, end)
 
@@ -106,6 +115,7 @@ class AppLovinMax(Module):
 
         ctx.mark_synced("applovin_max", freshness_note="near real-time")
         self.log.info("stored %d AdRevenueRecord rows", len(records))
+        return len(records)
 
     def self_test(self, ctx: Context) -> tuple[bool, str]:
         try:

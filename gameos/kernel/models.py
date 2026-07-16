@@ -89,6 +89,20 @@ class CohortLTV(Base):
     __table_args__ = (UniqueConstraint("game_id", "cohort_date", "day_n"),)
 
 
+class CampaignMap(Base):
+    """Owner-maintained mapping: which game does a UA campaign belong to.
+    Connectors consult this on every pull so new CampaignRecords arrive pre-mapped."""
+
+    __tablename__ = "campaign_maps"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ua_platform: Mapped[str] = mapped_column(String(20))
+    campaign_id: Mapped[str] = mapped_column(String(100))
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"))
+
+    __table_args__ = (UniqueConstraint("ua_platform", "campaign_id"),)
+
+
 class AnalyticsGap(Base):
     __tablename__ = "analytics_gaps"
 

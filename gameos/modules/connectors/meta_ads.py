@@ -15,7 +15,7 @@ from datetime import date, timedelta
 
 import httpx
 
-from gameos.kernel.models import CampaignRecord
+from gameos.kernel.models import CampaignMap, CampaignRecord
 from gameos.kernel.module import Module, ModuleInfo, ModuleType
 from gameos.kernel.runtime import Context
 
@@ -72,6 +72,12 @@ class MetaAds(Module):
         end = date.today()
         start = end - timedelta(days=PULL_DAYS - 1)
 
+        with ctx.session() as session:
+            mapping = dict(
+                session.query(CampaignMap.campaign_id, CampaignMap.game_id)
+                .filter(CampaignMap.ua_platform == "meta")
+                .all()
+            )
         records = []
         for account in self._accounts():
             rows = self._fetch_account(account, start, end)
@@ -79,12 +85,13 @@ class MetaAds(Module):
             for row in rows:
                 spend = float(row.get("spend") or 0.0)
                 installs = self._installs(row)
+                campaign_id = str(row.get("campaign_id"))
                 records.append(
                     CampaignRecord(
-                        game_id=None,
+                        game_id=mapping.get(campaign_id),
                         date=date.fromisoformat(row["date_start"]),
                         ua_platform="meta",
-                        campaign_id=str(row.get("campaign_id")),
+                        campaign_id=campaign_id,
                         campaign_name=row.get("campaign_name"),
                         spend=spend,
                         installs=installs,

@@ -47,3 +47,8 @@ class Module(ABC):
         """Prove the module actually works (e.g. connector returns real data).
         Returns (ok, message). Override in every connector (SPEC 5.1)."""
         return True, "no self-test implemented"
+
+    def backfill(self, ctx: Context, days: int) -> str:
+        """Pull historical data as far back as the platform allows (connectors only).
+        Returns a human-readable summary."""
+        raise NotImplementedError(f"{self.info.name} does not support backfill")

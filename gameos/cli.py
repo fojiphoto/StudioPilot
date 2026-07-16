@@ -62,6 +62,104 @@ def test(name: str = typer.Argument(None, help="Module to self-test (omit for al
 
 
 @app.command()
+def backfill(
+    name: str = typer.Argument(..., help="Connector to backfill (e.g. applovin_max)"),
+    days: int = typer.Option(45, help="How many days back"),
+) -> None:
+    """Pull historical data as far back as the platform allows."""
+    engine = Engine()
+    module = next((m for m in engine.modules if m.info.name == name), None)
+    if module is None:
+        typer.echo(f"no module named '{name}'", err=True)
+        raise typer.Exit(1)
+    try:
+        summary = module.backfill(engine.ctx, days)
+    except NotImplementedError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1)
+    typer.echo(f"[OK] {name}: {summary}")
+
+
+@app.command()
+def games(search: str = typer.Argument(None, help="Filter by name substring")) -> None:
+    """List games with their ids (for campaign mapping and dev-cost entry)."""
+    from gameos.kernel.models import Game
+
+    engine = Engine()
+    with engine.ctx.session() as session:
+        query = session.query(Game).order_by(Game.name)
+        if search:
+            query = query.filter(Game.name.ilike(f"%{search}%"))
+        for game in query.all():
+            pkg = f"  ({game.package_name})" if game.package_name else ""
+            typer.echo(f"  #{game.id:<5} [{game.store:7}] {game.name}{pkg}")
+
+
+@app.command()
+def campaigns() -> None:
+    """List known campaigns and their game mapping status."""
+    from sqlalchemy import func
+
+    from gameos.kernel.models import CampaignRecord, Game
+
+    engine = Engine()
+    with engine.ctx.session() as session:
+        rows = (
+            session.query(
+                CampaignRecord.ua_platform,
+                CampaignRecord.campaign_id,
+                func.max(CampaignRecord.campaign_name),
+                CampaignRecord.game_id,
+                func.sum(CampaignRecord.spend),
+            )
+            .group_by(CampaignRecord.ua_platform, CampaignRecord.campaign_id, CampaignRecord.game_id)
+            .all()
+        )
+        if not rows:
+            typer.echo("  (no campaigns pulled yet)")
+        game_names = dict(session.query(Game.id, Game.name).all())
+        for platform, campaign_id, campaign_name, game_id, spend in rows:
+            mapped = game_names.get(game_id, "!! UNMAPPED - use: gameos map ...")
+            typer.echo(
+                f"  [{platform:9}] {campaign_id:20} {(campaign_name or '-')[:36]:36} "
+                f"spend ${spend or 0:8,.2f} -> {mapped}"
+            )
+
+
+@app.command(name="map")
+def map_campaign(
+    ua_platform: str = typer.Argument(..., help="google | meta | mintegral"),
+    campaign_id: str = typer.Argument(...),
+    game_id: int = typer.Argument(..., help="Game id from `gameos games`"),
+) -> None:
+    """Map a UA campaign to a game (applies to stored rows and all future pulls)."""
+    from gameos.kernel.models import CampaignMap, CampaignRecord, Game
+
+    engine = Engine()
+    with engine.ctx.session() as session:
+        game = session.get(Game, game_id)
+        if game is None:
+            typer.echo(f"no game with id {game_id} - run `gameos games`", err=True)
+            raise typer.Exit(1)
+        existing = (
+            session.query(CampaignMap)
+            .filter_by(ua_platform=ua_platform, campaign_id=campaign_id)
+            .one_or_none()
+        )
+        if existing:
+            existing.game_id = game_id
+        else:
+            session.add(CampaignMap(ua_platform=ua_platform, campaign_id=campaign_id, game_id=game_id))
+        updated = (
+            session.query(CampaignRecord)
+            .filter_by(ua_platform=ua_platform, campaign_id=campaign_id)
+            .update({CampaignRecord.game_id: game_id})
+        )
+        session.commit()
+    typer.echo(f"mapped {ua_platform}/{campaign_id} -> {game.name} ({updated} existing rows updated)")
+
+
+@app.command()
 def report() -> None:
     """Print current status: source freshness, ROAS, P&L, recent alerts."""
     from datetime import date, timedelta
