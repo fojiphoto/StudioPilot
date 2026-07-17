@@ -87,8 +87,11 @@
 - Caddyfile is no longer tracked (gitignored). `deploy/Caddyfile.template` + `deploy/setup-caddy.sh 'password'` render a local `Caddyfile` with domain/user/inlined-hash. compose proxy just mounts it. This avoids the `$`-in-bcrypt vs compose-interpolation problem that broke env-based auth.
 - Server currently runs a hand-inlined Caddyfile (auth verified 200). Server's Caddyfile is gitignored, so future `git pull && docker compose up -d --build` won't clobber it. If domain/password changes, re-run `deploy/setup-caddy.sh`.
 
+### Done (part 15 — custom domain live)
+- Owner added A record `gameos.factorialstudio.com → server IP` in PineHoster Manage DNS. Server switched: `.env` DOMAIN updated, Caddyfile now serves BOTH `gameos.factorialstudio.com` and the rDNS hostname, Let's Encrypt cert obtained for the custom domain. Verified (health + auth 200 via forced resolve; owner's local DNS still propagating).
+- **Portal is now https://gameos.factorialstudio.com/** (URL/creds in memory `gameos-vps-deployment`, not this public repo).
+
 ### Blocked on owner (optional / later)
-- Point `gameos.factorialstudio.com` A record → server IP (host's Zone Editor), then swap DOMAIN. rDNS hostname works fine until then.
 - Change portal password from the default.
 
 ### Next / reminders
