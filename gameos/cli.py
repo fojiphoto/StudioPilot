@@ -285,7 +285,7 @@ def enrich_names(
 
     def clean(title: str) -> str:
         title = re.sub(r"\s+", " ", title).strip()
-        for sep in (". ", " - ", " | "):
+        for sep in (". ", "! ", " - ", " | ", " – "):
             if sep in title:
                 title = title.split(sep)[0]
         return title[:80].strip()
