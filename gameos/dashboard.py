@@ -85,7 +85,7 @@ def top_games(start: str | None = None, end: str | None = None, limit: int = 12,
     start_date, end_date = _range(start, end)
     with session_factory()() as s:
         q = (
-            s.query(Game.id, Game.name, Game.display_name, Game.store,
+            s.query(Game.id, Game.name, Game.display_name, Game.store, Game.icon_url,
                     func.sum(AdRevenueRecord.revenue).label("rev"))
             .join(Game, Game.id == AdRevenueRecord.game_id)
             .filter(AdRevenueRecord.date >= start_date, AdRevenueRecord.date <= end_date)
@@ -93,11 +93,10 @@ def top_games(start: str | None = None, end: str | None = None, limit: int = 12,
         if store and store != "all":
             q = q.filter(Game.store == store)
         rows = q.group_by(Game.id).order_by(func.sum(AdRevenueRecord.revenue).desc()).limit(limit).all()
-    return {
-        "ids": [gid for gid, _, _, _, _ in rows],
-        "labels": [f"{(disp or name)[:26]} [{st}]" for _, name, disp, st, _ in rows],
-        "revenue": [round(float(rev or 0), 2) for _, _, _, _, rev in rows],
-    }
+    return [
+        {"id": gid, "name": disp or name, "store": st, "icon": icon, "revenue": round(float(rev or 0), 2)}
+        for gid, name, disp, st, icon, rev in rows
+    ]
 
 
 @app.get("/api/game/{game_id}")
@@ -149,7 +148,7 @@ def game_detail(game_id: int, start: str | None = None, end: str | None = None):
     daily_dau = [metric(d, "dau") for d in days_list]
     daily_mau = [metric(d, "mau") for d in days_list]
     return {
-        "game": {"id": game.id, "name": game.label, "store": game.store,
+        "game": {"id": game.id, "name": game.label, "store": game.store, "icon": game.icon_url,
                  "package": game.package_name or game.name, "dev_cost": game.dev_cost},
         "labels": [d.isoformat() for d in days_list],
         "revenue": daily_revenue,
@@ -238,7 +237,7 @@ def summary(store: str | None = None):
 def pnl(limit: int = 15, store: str | None = None):
     with session_factory()() as s:
         q = (
-            s.query(PnLSnapshot, Game.name, Game.display_name, Game.store)
+            s.query(PnLSnapshot, Game.id, Game.name, Game.display_name, Game.store, Game.icon_url)
             .join(Game, Game.id == PnLSnapshot.game_id)
             .filter(PnLSnapshot.period == "lifetime")
         )
@@ -246,9 +245,9 @@ def pnl(limit: int = 15, store: str | None = None):
             q = q.filter(Game.store == store)
         rows = q.order_by(PnLSnapshot.net.desc()).limit(limit).all()
     return [
-        {"game": disp or name, "store": st, "revenue": round(p.ad_revenue, 2),
+        {"id": gid, "game": disp or name, "store": st, "icon": icon, "revenue": round(p.ad_revenue, 2),
          "spend": round(p.spend, 2), "dev_cost": round(p.dev_cost, 2), "net": round(p.net, 2)}
-        for p, name, disp, st in rows
+        for p, gid, name, disp, st, icon in rows
     ]
 
 
@@ -256,7 +255,7 @@ def pnl(limit: int = 15, store: str | None = None):
 def games_list(q: str | None = None, store: str | None = None, limit: int = 40):
     """Search games by name/package (for the per-game selector). Respects store filter."""
     with session_factory()() as s:
-        query = s.query(Game.id, Game.name, Game.display_name, Game.store)
+        query = s.query(Game.id, Game.name, Game.display_name, Game.store, Game.icon_url)
         if q:
             like = f"%{q}%"
             query = query.filter(
@@ -265,7 +264,7 @@ def games_list(q: str | None = None, store: str | None = None, limit: int = 40):
         if store and store != "all":
             query = query.filter(Game.store == store)
         rows = query.order_by(Game.display_name.is_(None), Game.display_name, Game.name).limit(limit).all()
-    return [{"id": i, "name": disp or n, "store": st} for i, n, disp, st in rows]
+    return [{"id": i, "name": disp or n, "store": st, "icon": icon} for i, n, disp, st, icon in rows]
 
 
 PAGE = """<!DOCTYPE html>
@@ -275,23 +274,53 @@ PAGE = """<!DOCTYPE html>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <style>
   :root { color-scheme: dark; }
-  body { margin:0; font-family: system-ui, sans-serif; background:#0f1115; color:#e6e6e6; }
-  header { padding:16px 24px; border-bottom:1px solid #23262e; display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }
-  header h1 { margin:0; font-size:20px; } header span { color:#8a8f98; font-size:13px; }
-  .wrap { padding:20px 24px; max-width:1100px; margin:0 auto; }
-  .toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:16px; }
-  .toolbar button { background:#161a22; border:1px solid #23262e; color:#e6e6e6; border-radius:8px;
-    padding:6px 14px; cursor:pointer; font-size:13px; }
-  .toolbar button:hover { border-color:#60a5fa; }
-  .toolbar button.active { background:#1d4ed8; border-color:#1d4ed8; color:#fff; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, sans-serif; color:#e6e6e6;
+    background: radial-gradient(1200px 500px at 15% -10%, #1a2740 0%, #0f1115 55%) no-repeat, #0f1115; }
+  header { padding:16px 24px; border-bottom:1px solid #1e2530; display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+    background:rgba(13,17,23,.6); backdrop-filter:blur(6px); position:sticky; top:0; z-index:30; }
+  .logo { width:34px; height:34px; border-radius:9px; display:grid; place-items:center; font-size:18px;
+    background:linear-gradient(135deg,#3b82f6,#8b5cf6); box-shadow:0 4px 14px rgba(59,130,246,.35); }
+  header h1 { margin:0; font-size:19px; font-weight:700; letter-spacing:.2px; }
+  header span { color:#8a8f98; font-size:13px; }
+  .wrap { padding:20px 24px; max-width:1140px; margin:0 auto; }
+  .toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:14px; }
+  .toolbar button { background:#161a22; border:1px solid #23262e; color:#cbd2dc; border-radius:8px;
+    padding:6px 13px; cursor:pointer; font-size:13px; transition:all .12s; }
+  .toolbar button:hover { border-color:#3b82f6; color:#fff; }
+  .toolbar button.active { background:linear-gradient(135deg,#2563eb,#4f46e5); border-color:#4f46e5; color:#fff;
+    box-shadow:0 2px 10px rgba(37,99,235,.4); }
   .toolbar input[type=date] { background:#161a22; border:1px solid #23262e; color:#e6e6e6;
     border-radius:8px; padding:5px 8px; font-size:13px; }
-  .toolbar .sep { color:#8a8f98; }
-  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; }
-  .card { background:#161a22; border:1px solid #23262e; border-radius:10px; padding:14px 16px; }
-  .card .k { color:#8a8f98; font-size:12px; text-transform:uppercase; letter-spacing:.05em; }
-  .card .v { font-size:24px; font-weight:600; margin-top:4px; }
+  .toolbar .sep { color:#3a4150; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(165px,1fr)); gap:12px; }
+  .card { background:linear-gradient(180deg,#171c26,#12161e); border:1px solid #23262e; border-radius:12px;
+    padding:15px 17px; position:relative; overflow:hidden; }
+  .card::before { content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:#3b82f6; opacity:.8; }
+  .card .k { color:#8a8f98; font-size:11px; text-transform:uppercase; letter-spacing:.06em; }
+  .card .v { font-size:24px; font-weight:700; margin-top:5px; }
   .pos { color:#4ade80; } .neg { color:#f87171; }
+  /* store badges */
+  .badge { display:inline-flex; align-items:center; gap:4px; font-size:10px; font-weight:600; padding:2px 7px;
+    border-radius:20px; text-transform:uppercase; letter-spacing:.03em; vertical-align:middle; }
+  .badge svg { width:11px; height:11px; }
+  .badge.amazon { background:rgba(255,153,0,.16); color:#ff9900; }
+  .badge.android { background:rgba(61,220,132,.15); color:#3ddc84; }
+  .badge.ios { background:rgba(200,209,220,.15); color:#c8d1dc; }
+  /* game icon */
+  .gicon { width:34px; height:34px; border-radius:9px; object-fit:cover; background:#23262e; flex:none; }
+  .gicon.sm { width:24px; height:24px; border-radius:6px; }
+  .gicon.ph { display:grid; place-items:center; font-size:13px; font-weight:700; color:#8a8f98; }
+  /* leaderboard */
+  .leaderboard { display:flex; flex-direction:column; gap:2px; }
+  .lb-row { display:flex; align-items:center; gap:12px; padding:8px 10px; border-radius:9px; cursor:pointer;
+    transition:background .12s; }
+  .lb-row:hover { background:#1b212c; }
+  .lb-rank { width:20px; text-align:right; color:#6b7280; font-size:12px; font-variant-numeric:tabular-nums; }
+  .lb-main { flex:1; min-width:0; }
+  .lb-name { font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .lb-bar { height:5px; border-radius:3px; margin-top:5px; background:linear-gradient(90deg,#3b82f6,#8b5cf6); }
+  .lb-rev { font-size:13px; font-weight:600; font-variant-numeric:tabular-nums; white-space:nowrap; }
   .panel { background:#161a22; border:1px solid #23262e; border-radius:10px; padding:16px; margin-top:16px; }
   .panel h2 { margin:0 0 10px; font-size:14px; color:#8a8f98; font-weight:600; text-transform:uppercase; letter-spacing:.05em; }
   table { width:100%; border-collapse:collapse; font-size:13px; }
@@ -305,10 +334,16 @@ PAGE = """<!DOCTYPE html>
   #gameresults { position:absolute; top:110%; left:0; z-index:20; min-width:280px; max-height:320px;
     overflow-y:auto; background:#161a22; border:1px solid #2b3448; border-radius:8px; display:none; }
   #gameresults div { padding:7px 12px; cursor:pointer; font-size:13px; border-bottom:1px solid #23262e; }
+  #gameresults div { display:flex; align-items:center; gap:9px; }
   #gameresults div:hover { background:#1d4ed8; }
-  #gameresults .st { color:#8a8f98; font-size:11px; }
+  #gameresults .st { color:#8a8f98; font-size:11px; margin-left:auto; }
+  .panel { background:linear-gradient(180deg,#161b24,#12161e); border:1px solid #23262e; border-radius:12px; padding:16px 18px; margin-top:16px; }
 </style></head><body>
-<header><h1>GameOS</h1><span>read-only dashboard &mdash; the engine runs headless</span></header>
+<header>
+  <div class="logo">&#127918;</div>
+  <div><h1>GameOS</h1></div>
+  <span>UA &amp; monetization command center</span>
+</header>
 <div class="wrap">
   <div class="toolbar" id="toolbar">
     <button data-days="1">1D</button>
@@ -335,7 +370,7 @@ PAGE = """<!DOCTYPE html>
   </div>
   <div class="cards" id="cards"></div>
   <div class="panel"><h2 id="dailyTitle">Revenue vs Spend</h2><canvas id="daily"></canvas></div>
-  <div class="panel"><h2 id="topTitle">Top games by revenue</h2><canvas id="top"></canvas></div>
+  <div class="panel"><h2 id="topTitle">Top games by revenue</h2><div id="top" class="leaderboard"></div></div>
   <div class="panel"><h2>P&amp;L (lifetime, top by net)</h2><table id="pnl"></table>
     <div class="muted">lifetime = since GameOS started collecting (45-day backfill)</div></div>
   <div class="panel"><h2>Alerts</h2><table id="alerts"></table></div>
@@ -346,8 +381,19 @@ const $ = (id) => document.getElementById(id);
 const usd = (v) => '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
 async function j(url) { return (await fetch(url)).json(); }
 const iso = (d) => d.toISOString().slice(0,10);
+const esc = (s) => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
-let bounds = null, lifetime = null, dailyChart = null, topChart = null;
+const STORE_GLYPH = {
+  amazon: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.3 16.4C16.6 17.7 14.1 18.4 12 18.4c-3 0-5.6-1.1-7.6-2.9-.2-.1 0-.3.1-.2 2.2 1.3 4.8 2 7.6 2 1.9 0 3.9-.4 5.8-1.2.3-.1.5.2.4.5zM19 15.3c-.2-.3-1.5-.1-2.1 0-.2 0-.2-.1 0-.3.9-.7 2.5-.5 2.7-.2.2.2 0 1.7-.9 2.4-.1.1-.3 0-.2-.1.2-.5.6-1.5.5-1.8z"/><path d="M12.3 12.2v-.9c0-.1.1-.2.2-.2h3.9c.1 0 .2.1.2.2v.8c0 .1-.1.3-.3.5l-2 2.9c.8 0 1.6.1 2.3.5.1.1.2.2.2.3v.9c0 .1-.2.3-.3.2-1.2-.6-2.8-.7-4.1 0-.1.1-.3-.1-.3-.2v-.9c0-.1 0-.3.2-.5l2.3-3.3h-2c-.2 0-.3-.1-.3-.2zM7 15.6H5.8c-.1 0-.2-.1-.2-.2V8.3c0-.1.1-.2.2-.2h1.1c.1 0 .2.1.2.2v.9c.3-.8 1-1.2 1.8-1.2.9 0 1.4.4 1.7 1.2.3-.8 1.1-1.2 1.9-1.2.6 0 1.2.2 1.6.8.4.6.3 1.5.3 2.2v3.4c0 .1-.1.2-.2.2h-1.2c-.1 0-.2-.1-.2-.2v-2.9c0-.3 0-1-.1-1.2-.1-.4-.4-.5-.7-.5-.3 0-.5.2-.7.5-.1.3-.1.9-.1 1.2v2.9c0 .1-.1.2-.2.2h-1.2c-.1 0-.2-.1-.2-.2v-2.9c0-.7.1-1.7-.8-1.7-.9 0-.8 1-.8 1.7v2.9c0 .1-.1.2-.2.2z"/></svg>',
+  android: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 9v7a1 1 0 001 1h1v3a1 1 0 002 0v-3h2v3a1 1 0 002 0v-3h1a1 1 0 001-1V9H4zM2.5 9A1.5 1.5 0 001 10.5v4a1.5 1.5 0 003 0v-4A1.5 1.5 0 002.5 9zm17 0a1.5 1.5 0 00-1.5 1.5v4a1.5 1.5 0 003 0v-4A1.5 1.5 0 0019.5 9zM15 3.6l1-1.6a.3.3 0 00-.5-.3l-1.1 1.7A5.5 5.5 0 0012 3c-.9 0-1.7.2-2.4.5L8.5 1.7a.3.3 0 00-.5.3l1 1.6C7.4 4.5 6.3 6 6 8h12c-.3-2-1.4-3.5-3-4.4zM9.5 6a.6.6 0 110-1.2.6.6 0 010 1.2zm5 0a.6.6 0 110-1.2.6.6 0 010 1.2z"/></svg>',
+  ios: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 12.5c0-2 1.6-3 1.7-3.1-1-1.4-2.4-1.6-2.9-1.6-1.2-.1-2.4.7-3 .7-.6 0-1.6-.7-2.6-.7-1.3 0-2.6.8-3.3 2-1.4 2.4-.4 6 1 8 .7 1 1.5 2.1 2.5 2 1-.1 1.4-.6 2.6-.6s1.5.6 2.6.6 1.7-1 2.4-2c.7-1.1 1-2.1 1-2.2-.1 0-2-.8-2-3.1zM14.2 6.3c.5-.7.9-1.6.8-2.5-.8 0-1.7.5-2.3 1.2-.5.6-.9 1.5-.8 2.4.9.1 1.7-.4 2.3-1.1z"/></svg>',
+};
+const badge = (store) => `<span class="badge ${store}">${STORE_GLYPH[store]||''}${store}</span>`;
+const gicon = (url, name, cls='') => url
+  ? `<img class="gicon ${cls}" src="${esc(url)}" referrerpolicy="no-referrer" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'gicon ph ${cls}',textContent:'${esc((name||'?')[0].toUpperCase())}'}))">`
+  : `<div class="gicon ph ${cls}">${esc((name||'?')[0].toUpperCase())}</div>`;
+
+let bounds = null, lifetime = null, dailyChart = null;
 let store = 'all', curStart = null, curEnd = null;
 
 function setActive(btn) {
@@ -359,8 +405,13 @@ async function loadSummary() {
   const sum = await j('/api/summary?store=' + store);
   lifetime = { net: sum.lifetime.net, games: sum.games };
   const p = await j('/api/pnl?store=' + store);
-  $('pnl').innerHTML = '<tr><th>Game</th><th>Store</th><th class="num">Revenue</th><th class="num">Spend</th><th class="num">Dev cost</th><th class="num">Net</th></tr>' +
-    (p.length ? p.map(r => `<tr><td>${r.game}</td><td>${r.store}</td><td class="num">${usd(r.revenue)}</td><td class="num">${usd(r.spend)}</td><td class="num">${usd(r.dev_cost)}</td><td class="num ${r.net>=0?'pos':'neg'}">${usd(r.net)}</td></tr>`).join('') : '<tr><td class="muted">no data for this store</td></tr>');
+  $('pnl').innerHTML = '<tr><th></th><th>Game</th><th class="num">Revenue</th><th class="num">Spend</th><th class="num">Dev cost</th><th class="num">Net</th></tr>' +
+    (p.length ? p.map(r => `<tr style="cursor:pointer" onclick="window.location='/game/${r.id}?start=${curStart}&end=${curEnd}'">
+      <td style="width:32px">${gicon(r.icon, r.game, 'sm')}</td>
+      <td>${esc(r.game)} ${badge(r.store)}</td>
+      <td class="num">${usd(r.revenue)}</td><td class="num">${usd(r.spend)}</td>
+      <td class="num">${usd(r.dev_cost)}</td><td class="num ${r.net>=0?'pos':'neg'}">${usd(r.net)}</td></tr>`).join('')
+      : '<tr><td class="muted">no data for this store</td></tr>');
   return sum;
 }
 
@@ -390,19 +441,17 @@ async function loadRange(start, end) {
       x:{ticks:{color:'#8a8f98', maxTicksLimit:10}, grid:{color:'#23262e'}},
       y:{ticks:{color:'#8a8f98'}, grid:{color:'#23262e'}}}}});
 
-  if (topChart) { topChart.data.labels = t.labels; topChart.data.datasets[0].data = t.revenue;
-    topChart.gameIds = t.ids; topChart.update(); }
-  else { topChart = new Chart($('top'), { type:'bar', data:{ labels:t.labels, datasets:[
-      {label:'Revenue', data:t.revenue, backgroundColor:'#60a5fa'}]},
-    options:{ indexAxis:'y', plugins:{legend:{display:false}},
-      onClick: (evt, els) => { if (els.length) {
-        const id = topChart.gameIds[els[0].index];
-        window.location = `/game/${id}?start=${$('from').value}&end=${$('to').value}`; } }, // per-game page (store N/A, one game)
-      onHover: (evt, els) => { evt.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
-      scales:{
-      x:{ticks:{color:'#8a8f98'}, grid:{color:'#23262e'}},
-      y:{ticks:{color:'#8a8f98'}, grid:{display:false}}}}});
-    topChart.gameIds = t.ids; }
+  const maxRev = Math.max(1, ...t.map(g => g.revenue));
+  $('top').innerHTML = t.length ? t.map((g, i) => `
+    <div class="lb-row" onclick="window.location='/game/${g.id}?start=${start}&end=${end}'">
+      <div class="lb-rank">${i+1}</div>
+      ${gicon(g.icon, g.name)}
+      <div class="lb-main">
+        <div class="lb-name">${esc(g.name)} ${badge(g.store)}</div>
+        <div class="lb-bar" style="width:${Math.max(3, g.revenue/maxRev*100)}%"></div>
+      </div>
+      <div class="lb-rev">${usd(g.revenue)}</div>
+    </div>`).join('') : '<div class="muted">no revenue in this range</div>';
 
   $('from').value = start; $('to').value = end;
 }
@@ -462,7 +511,7 @@ function presetRange(days) {
     searchTimer = setTimeout(async () => {
       const list = await j(`/api/games?q=${encodeURIComponent(q)}&store=${store}`);
       results.innerHTML = list.length
-        ? list.map(g => `<div data-id="${g.id}">${g.name} <span class="st">[${g.store}]</span></div>`).join('')
+        ? list.map(g => `<div data-id="${g.id}">${gicon(g.icon, g.name, 'sm')}<span>${esc(g.name)}</span>${badge(g.store)}</div>`).join('')
         : '<div class="muted" style="cursor:default">no match</div>';
       results.style.display = 'block';
       results.querySelectorAll('div[data-id]').forEach(el => el.addEventListener('click', () => {
@@ -517,8 +566,21 @@ GAME_PAGE = """<!DOCTYPE html>
     padding:12px 16px; margin-top:16px; font-size:13px; }
   canvas { max-height:260px; }
   .muted { color:#8a8f98; font-size:12px; }
+  body { background: radial-gradient(1200px 500px at 15% -10%, #1a2740 0%, #0f1115 55%) no-repeat, #0f1115; }
+  header { align-items:center; }
+  #ghead-icon { width:44px; height:44px; border-radius:11px; object-fit:cover; background:#23262e; flex:none; }
+  .badge { display:inline-flex; align-items:center; gap:4px; font-size:10px; font-weight:600; padding:2px 7px;
+    border-radius:20px; text-transform:uppercase; vertical-align:middle; }
+  .badge svg { width:11px; height:11px; }
+  .badge.amazon { background:rgba(255,153,0,.16); color:#ff9900; }
+  .badge.android { background:rgba(61,220,132,.15); color:#3ddc84; }
+  .badge.ios { background:rgba(200,209,220,.15); color:#c8d1dc; }
 </style></head><body>
-<header><a href="/">&larr; portfolio</a><h1 id="title">...</h1><span id="subtitle"></span></header>
+<header>
+  <a href="/">&larr;</a>
+  <img id="ghead-icon" style="display:none">
+  <div><h1 id="title">...</h1><span id="subtitle"></span></div>
+</header>
 <div class="wrap">
   <div class="toolbar" id="toolbar">
     <button data-days="7">7D</button>
@@ -564,7 +626,9 @@ async function load(start, end) {
   const d = await j(`/api/game/${gameId}?start=${start}&end=${end}`);
   if (d.error) { document.body.innerHTML = '<p style="padding:40px">' + d.error + '</p>'; return; }
   $('title').textContent = d.game.name;
-  $('subtitle').textContent = `${d.game.store}${d.game.package ? ' - ' + d.game.package : ''}`;
+  const STORE_G = {amazon:'#ff9900',android:'#3ddc84',ios:'#c8d1dc'};
+  $('subtitle').innerHTML = `<span class="badge ${d.game.store}">${d.game.store}</span> <span class="muted">${d.game.package||''}</span>`;
+  if (d.game.icon) { const ic = $('ghead-icon'); ic.src = d.game.icon; ic.referrerPolicy = 'no-referrer'; ic.style.display = 'block'; }
   document.title = 'GameOS - ' + d.game.name;
   $('from').value = start; $('to').value = end;
   $('metricsNote').style.display = d.has_metrics ? 'none' : 'block';

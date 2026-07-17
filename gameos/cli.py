@@ -294,7 +294,7 @@ def enrich_names(
     with engine.ctx.session() as session:
         games = (
             session.query(Game)
-            .filter(Game.store == store, Game.display_name.is_(None))
+            .filter(Game.store == store, (Game.display_name.is_(None)) | (Game.icon_url.is_(None)))
             .limit(limit).all()
         )
         typer.echo(f"{len(games)} {store} games to look up")
@@ -305,21 +305,23 @@ def enrich_names(
                 if not pkg or "." not in pkg:
                     continue
                 try:
-                    if store == "amazon":
-                        r = client.get("https://www.amazon.com/gp/mas/dl/android", params={"p": pkg})
-                        m = re.search(r'property="og:title" content="([^"]+)"', r.text)
-                        title = m.group(1) if m else None
-                    else:
-                        title = None
-                    if title:
-                        game.display_name = clean(title)
+                    if store != "amazon":
+                        continue
+                    r = client.get("https://www.amazon.com/gp/mas/dl/android", params={"p": pkg})
+                    title = re.search(r'property="og:title" content="([^"]+)"', r.text)
+                    image = re.search(r'property="og:image" content="([^"]+)"', r.text)
+                    if title and not game.display_name:
+                        game.display_name = clean(title.group(1))
+                    if image and not game.icon_url:
+                        game.icon_url = image.group(1)
+                    if title or image:
                         ok += 1
-                        typer.echo(f"  {pkg} -> {game.display_name}")
+                        typer.echo(f"  {pkg} -> {game.display_name}  icon={'y' if game.icon_url else 'n'}")
                 except Exception as exc:
                     typer.echo(f"  {pkg} FAILED: {exc}", err=True)
                 time.sleep(delay)
             session.commit()
-    typer.echo(f"named {ok}/{len(games)} games")
+    typer.echo(f"enriched {ok}/{len(games)} games")
 
 
 @app.command()

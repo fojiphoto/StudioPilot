@@ -27,6 +27,7 @@ class Game(Base):
     launch_date: Mapped[date | None] = mapped_column(Date)
     dev_cost: Mapped[float] = mapped_column(Float, default=0.0)  # manual entry, feeds P&L
     ingest_key: Mapped[str | None] = mapped_column(String(64), unique=True)  # GameOS SDK auth per game
+    icon_url: Mapped[str | None] = mapped_column(String(500))  # store app icon (og:image)
 
     __table_args__ = (UniqueConstraint("name", "store"),)
 
