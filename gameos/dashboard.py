@@ -251,6 +251,20 @@ def pnl(limit: int = 15, store: str | None = None):
     ]
 
 
+@app.get("/api/games")
+def games_list(q: str | None = None, store: str | None = None, limit: int = 40):
+    """Search games by name/package (for the per-game selector). Respects store filter."""
+    with session_factory()() as s:
+        query = s.query(Game.id, Game.name, Game.store)
+        if q:
+            like = f"%{q}%"
+            query = query.filter((Game.name.ilike(like)) | (Game.package_name.ilike(like)))
+        if store and store != "all":
+            query = query.filter(Game.store == store)
+        rows = query.order_by(Game.name).limit(limit).all()
+    return [{"id": i, "name": n, "store": st} for i, n, st in rows]
+
+
 PAGE = """<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -282,6 +296,14 @@ PAGE = """<!DOCTYPE html>
   th { color:#8a8f98; font-weight:500; } td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
   .muted { color:#8a8f98; font-size:12px; }
   canvas { max-height:300px; }
+  .gamesearch-wrap { position:relative; }
+  #gamesearch { background:#161a22; border:1px solid #23262e; color:#e6e6e6; border-radius:8px;
+    padding:6px 10px; font-size:13px; min-width:240px; }
+  #gameresults { position:absolute; top:110%; left:0; z-index:20; min-width:280px; max-height:320px;
+    overflow-y:auto; background:#161a22; border:1px solid #2b3448; border-radius:8px; display:none; }
+  #gameresults div { padding:7px 12px; cursor:pointer; font-size:13px; border-bottom:1px solid #23262e; }
+  #gameresults div:hover { background:#1d4ed8; }
+  #gameresults .st { color:#8a8f98; font-size:11px; }
 </style></head><body>
 <header><h1>GameOS</h1><span>read-only dashboard &mdash; the engine runs headless</span></header>
 <div class="wrap">
@@ -302,6 +324,11 @@ PAGE = """<!DOCTYPE html>
     <button data-store="amazon">Amazon</button>
     <button data-store="android">Android</button>
     <button data-store="ios">iOS</button>
+    <span class="sep">|</span>
+    <span class="gamesearch-wrap">
+      <input id="gamesearch" placeholder="&#128269; open any game by name..." autocomplete="off">
+      <div id="gameresults"></div>
+    </span>
   </div>
   <div class="cards" id="cards"></div>
   <div class="panel"><h2 id="dailyTitle">Revenue vs Spend</h2><canvas id="daily"></canvas></div>
@@ -421,6 +448,28 @@ function presetRange(days) {
     await loadSummary();
     loadRange(curStart, curEnd);
   }));
+
+  // per-game search: type -> matching games -> click opens that game's page
+  const box = $('gamesearch'), results = $('gameresults');
+  let searchTimer = null;
+  box.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    const q = box.value.trim();
+    if (!q) { results.style.display = 'none'; return; }
+    searchTimer = setTimeout(async () => {
+      const list = await j(`/api/games?q=${encodeURIComponent(q)}&store=${store}`);
+      results.innerHTML = list.length
+        ? list.map(g => `<div data-id="${g.id}">${g.name} <span class="st">[${g.store}]</span></div>`).join('')
+        : '<div class="muted" style="cursor:default">no match</div>';
+      results.style.display = 'block';
+      results.querySelectorAll('div[data-id]').forEach(el => el.addEventListener('click', () => {
+        window.location = `/game/${el.dataset.id}?start=${curStart}&end=${curEnd}`;
+      }));
+    }, 200);
+  });
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.gamesearch-wrap')) results.style.display = 'none';
+  });
 
   const [s, e] = presetRange(7);
   loadRange(s, e);
