@@ -19,7 +19,8 @@ class Game(Base):
     __tablename__ = "games"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(200))
+    name: Mapped[str] = mapped_column(String(200))  # raw name from source (often bundle id for Amazon)
+    display_name: Mapped[str | None] = mapped_column(String(200))  # human title when known
     store: Mapped[str] = mapped_column(String(20))  # ios | android | amazon
     package_name: Mapped[str | None] = mapped_column(String(200), index=True)  # bundle id, joins sources
     genre: Mapped[str | None] = mapped_column(String(100))
@@ -28,6 +29,11 @@ class Game(Base):
     ingest_key: Mapped[str | None] = mapped_column(String(64), unique=True)  # GameOS SDK auth per game
 
     __table_args__ = (UniqueConstraint("name", "store"),)
+
+    @property
+    def label(self) -> str:
+        """Human-facing name: display_name if set, else the raw name."""
+        return self.display_name or self.name
 
 
 class AdRevenueRecord(Base):

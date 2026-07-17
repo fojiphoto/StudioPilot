@@ -150,10 +150,55 @@ def games(search: str = typer.Argument(None, help="Filter by name substring")) -
     with engine.ctx.session() as session:
         query = session.query(Game).order_by(Game.name)
         if search:
-            query = query.filter(Game.name.ilike(f"%{search}%"))
+            like = f"%{search}%"
+            query = query.filter((Game.name.ilike(like)) | (Game.display_name.ilike(like)))
         for game in query.all():
-            pkg = f"  ({game.package_name})" if game.package_name else ""
-            typer.echo(f"  #{game.id:<5} [{game.store:7}] {game.name}{pkg}")
+            pkg = f"  ({game.package_name or game.name})"
+            typer.echo(f"  #{game.id:<5} [{game.store:7}] {game.label}{pkg}")
+
+
+@app.command()
+def rename(
+    game_id: int = typer.Argument(None, help="Game id (omit with --import)"),
+    name: str = typer.Argument(None, help="Human display name"),
+    import_file: str = typer.Option(None, "--import", help="TSV/CSV file: <id or package><tab/comma><name> per line"),
+) -> None:
+    """Set a game's human display name (used everywhere in the portal)."""
+    from gameos.kernel.models import Game
+
+    engine = Engine()
+    with engine.ctx.session() as session:
+        if import_file:
+            with open(import_file, encoding="utf-8") as fh:
+                lines = [ln for ln in fh.read().splitlines() if ln.strip()]
+            done = 0
+            for line in lines:
+                delim = "\t" if "\t" in line else ","
+                key, _, val = line.partition(delim)
+                key, val = key.strip(), val.strip()
+                if not val:
+                    continue
+                game = (
+                    session.get(Game, int(key)) if key.isdigit()
+                    else session.query(Game).filter(
+                        (Game.package_name == key) | (Game.name == key)).first()
+                )
+                if game:
+                    game.display_name = val
+                    done += 1
+            session.commit()
+            typer.echo(f"renamed {done} games from {import_file}")
+            return
+        if game_id is None or not name:
+            typer.echo("usage: gameos rename <game_id> \"<name>\"   OR   --import <file>", err=True)
+            raise typer.Exit(1)
+        game = session.get(Game, game_id)
+        if game is None:
+            typer.echo(f"no game with id {game_id}", err=True)
+            raise typer.Exit(1)
+        game.display_name = name
+        session.commit()
+        typer.echo(f"#{game.id} -> {name}")
 
 
 @app.command()

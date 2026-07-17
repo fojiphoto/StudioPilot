@@ -136,13 +136,23 @@ class Mintegral(Module):
                 for m in session.query(CampaignMap).filter_by(ua_platform="mintegral").all()
             }
             games_by_package = {}
+            games_by_id = {}
             for game in session.query(Game).filter(Game.package_name.is_not(None)).all():
                 games_by_package.setdefault(game.package_name.lower(), game.id)
+                games_by_id[game.id] = game
+            enriched = 0
             for campaign in campaigns:
                 campaign_id = str(campaign.get("campaign_id") or "")
                 if not campaign_id:
                     continue
                 names[campaign_id] = campaign.get("campaign_name") or ""
+                # Enrich human display name: bundle_id -> product_name (real title).
+                bundle_l = (campaign.get("bundle_id") or "").lower()
+                product = (campaign.get("product_name") or "").strip()
+                gid = games_by_package.get(bundle_l)
+                if product and gid and not games_by_id[gid].display_name:
+                    games_by_id[gid].display_name = product
+                    enriched += 1
                 if campaign_id in mapped:
                     continue
                 bundle = (campaign.get("bundle_id") or "").lower()
@@ -159,6 +169,8 @@ class Mintegral(Module):
                 )
                 self.log.info("auto-mapped campaign %s (%s) -> game #%s [%s]",
                               campaign_id, names[campaign_id], game_id, bundle)
+            if enriched:
+                self.log.info("enriched %d game display names from Mintegral product_name", enriched)
             session.commit()
         return names
 

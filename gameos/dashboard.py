@@ -85,7 +85,8 @@ def top_games(start: str | None = None, end: str | None = None, limit: int = 12,
     start_date, end_date = _range(start, end)
     with session_factory()() as s:
         q = (
-            s.query(Game.id, Game.name, Game.store, func.sum(AdRevenueRecord.revenue).label("rev"))
+            s.query(Game.id, Game.name, Game.display_name, Game.store,
+                    func.sum(AdRevenueRecord.revenue).label("rev"))
             .join(Game, Game.id == AdRevenueRecord.game_id)
             .filter(AdRevenueRecord.date >= start_date, AdRevenueRecord.date <= end_date)
         )
@@ -93,9 +94,9 @@ def top_games(start: str | None = None, end: str | None = None, limit: int = 12,
             q = q.filter(Game.store == store)
         rows = q.group_by(Game.id).order_by(func.sum(AdRevenueRecord.revenue).desc()).limit(limit).all()
     return {
-        "ids": [game_id for game_id, _, _, _ in rows],
-        "labels": [f"{name[:26]} [{store}]" for _, name, store, _ in rows],
-        "revenue": [round(float(rev or 0), 2) for _, _, _, rev in rows],
+        "ids": [gid for gid, _, _, _, _ in rows],
+        "labels": [f"{(disp or name)[:26]} [{st}]" for _, name, disp, st, _ in rows],
+        "revenue": [round(float(rev or 0), 2) for _, _, _, _, rev in rows],
     }
 
 
@@ -148,8 +149,8 @@ def game_detail(game_id: int, start: str | None = None, end: str | None = None):
     daily_dau = [metric(d, "dau") for d in days_list]
     daily_mau = [metric(d, "mau") for d in days_list]
     return {
-        "game": {"id": game.id, "name": game.name, "store": game.store,
-                 "package": game.package_name, "dev_cost": game.dev_cost},
+        "game": {"id": game.id, "name": game.label, "store": game.store,
+                 "package": game.package_name or game.name, "dev_cost": game.dev_cost},
         "labels": [d.isoformat() for d in days_list],
         "revenue": daily_revenue,
         "spend": [round(float(spend.get(d, 0) or 0), 2) for d in days_list],
@@ -237,7 +238,7 @@ def summary(store: str | None = None):
 def pnl(limit: int = 15, store: str | None = None):
     with session_factory()() as s:
         q = (
-            s.query(PnLSnapshot, Game.name, Game.store)
+            s.query(PnLSnapshot, Game.name, Game.display_name, Game.store)
             .join(Game, Game.id == PnLSnapshot.game_id)
             .filter(PnLSnapshot.period == "lifetime")
         )
@@ -245,9 +246,9 @@ def pnl(limit: int = 15, store: str | None = None):
             q = q.filter(Game.store == store)
         rows = q.order_by(PnLSnapshot.net.desc()).limit(limit).all()
     return [
-        {"game": name, "store": store, "revenue": round(p.ad_revenue, 2),
+        {"game": disp or name, "store": st, "revenue": round(p.ad_revenue, 2),
          "spend": round(p.spend, 2), "dev_cost": round(p.dev_cost, 2), "net": round(p.net, 2)}
-        for p, name, store in rows
+        for p, name, disp, st in rows
     ]
 
 
@@ -255,14 +256,16 @@ def pnl(limit: int = 15, store: str | None = None):
 def games_list(q: str | None = None, store: str | None = None, limit: int = 40):
     """Search games by name/package (for the per-game selector). Respects store filter."""
     with session_factory()() as s:
-        query = s.query(Game.id, Game.name, Game.store)
+        query = s.query(Game.id, Game.name, Game.display_name, Game.store)
         if q:
             like = f"%{q}%"
-            query = query.filter((Game.name.ilike(like)) | (Game.package_name.ilike(like)))
+            query = query.filter(
+                (Game.name.ilike(like)) | (Game.package_name.ilike(like)) | (Game.display_name.ilike(like))
+            )
         if store and store != "all":
             query = query.filter(Game.store == store)
-        rows = query.order_by(Game.name).limit(limit).all()
-    return [{"id": i, "name": n, "store": st} for i, n, st in rows]
+        rows = query.order_by(Game.display_name.is_(None), Game.display_name, Game.name).limit(limit).all()
+    return [{"id": i, "name": disp or n, "store": st} for i, n, disp, st in rows]
 
 
 PAGE = """<!DOCTYPE html>
