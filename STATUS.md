@@ -99,8 +99,15 @@
 - Dashboard `/api/games?q=&store=` search endpoint + toolbar search box (dropdown, store-aware). Opens any of the 482 games (not just top-12) → its detail page. Deployed + verified live.
 - Portal now filters 3 ways: time (presets+calendar), store (All/Amazon/Android/iOS), game (search).
 
+### Done (part 18 — human game names)
+- `Game.display_name` + `.label` (display_name or name). Dashboard everywhere (top-games, P&L, search, game page) now shows the human title.
+- Auto-enrichment from two sources: Mintegral `product_name` (in the connector, by bundle_id) + **`gameos enrich-names --store amazon`** which resolves the Amazon Appstore og:title via `gp/mas/dl/android?p=<pkg>` (needs a real Chrome UA; works from the VPS). Titles cleaned (cut at ". "/"! "/dashes, 80 char cap).
+- Result: **428/482 games now have real display names.** 18 Amazon apps returned no store title (likely delisted); ~36 Android/iOS already had proper names (display_name NULL, label falls back to name).
+- CLI: `gameos rename <id> "<name>"` and `gameos rename --import <file>` (id/package -> name) for manual fixes.
+
 ### Blocked on owner (optional / later)
 - Change portal password from the default.
+- 18 delisted-ish Amazon games still show bundle ids — rename manually if needed.
 
 ### Next / reminders
 - After VPS is up: backfill into cloud Postgres, `gameos ingest-key --all`, instrument a pilot Amazon game with GameOSAnalytics.cs pointing at https://<domain>/collect.
