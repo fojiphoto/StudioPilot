@@ -105,9 +105,14 @@
 - Result: **428/482 games now have real display names.** 18 Amazon apps returned no store title (likely delisted); ~36 Android/iOS already had proper names (display_name NULL, label falls back to name).
 - CLI: `gameos rename <id> "<name>"` and `gameos rename --import <file>` (id/package -> name) for manual fixes.
 
+### Done (part 19 — visual polish)
+- `Game.icon_url` (og:image from Amazon Appstore, captured by `enrich-names`). **425 games have real store icons.**
+- Portal redesign: gradient header + 🎮 logo mark, gradient stat cards with accent bar, store badges (Amazon/Android/iOS SVG glyphs + colors), game icons everywhere. Top-games is now a clickable **leaderboard** (rank + icon + name + badge + gradient bar + revenue) instead of a Chart.js bar. P&L table + search dropdown show icons + badges. Game detail header shows big icon + badge. Android/iOS (no scrapable icon) show a colored initial placeholder.
+- Verified live-rendered in browser (real auth). NOTE: accessing the portal with credentials embedded in the URL (`user:pass@host`) breaks relative `fetch()` in some browsers — normal auth-dialog login is unaffected.
+
 ### Blocked on owner (optional / later)
 - Change portal password from the default.
-- 18 delisted-ish Amazon games still show bundle ids — rename manually if needed.
+- ~20 Amazon games with no store title/icon (likely delisted) show bundle id + initial placeholder — rename manually if needed.
 
 ### Next / reminders
 - After VPS is up: backfill into cloud Postgres, `gameos ingest-key --all`, instrument a pilot Amazon game with GameOSAnalytics.cs pointing at https://<domain>/collect.
