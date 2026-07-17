@@ -91,6 +91,10 @@
 - Owner added A record `gameos.factorialstudio.com → server IP` in PineHoster Manage DNS. Server switched: `.env` DOMAIN updated, Caddyfile now serves BOTH `gameos.factorialstudio.com` and the rDNS hostname, Let's Encrypt cert obtained for the custom domain. Verified (health + auth 200 via forced resolve; owner's local DNS still propagating).
 - **Portal is now https://gameos.factorialstudio.com/** (URL/creds in memory `gameos-vps-deployment`, not this public repo).
 
+### Done (part 16 — store filter)
+- Dashboard now has a store filter (All / Amazon / Android / iOS) — all endpoints (stats/daily/top-games/summary/pnl) accept `?store=`. Deployed live. Verified split: Amazon $1,837 (445 games), Android $420 (31), iOS $35 (6) over 45d — ~80% of revenue is Amazon.
+- Note on server git: Caddyfile is gitignored but the earlier tracked copy causes `git pull` to complain about local changes. Redeploy recipe: `cp Caddyfile /root/Caddyfile.live; git checkout -- Caddyfile; git pull; cp /root/Caddyfile.live Caddyfile; docker compose up -d --build`. (Documented in memory.)
+
 ### Blocked on owner (optional / later)
 - Change portal password from the default.
 
