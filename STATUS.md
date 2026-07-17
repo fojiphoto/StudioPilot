@@ -95,6 +95,10 @@
 - Dashboard now has a store filter (All / Amazon / Android / iOS) — all endpoints (stats/daily/top-games/summary/pnl) accept `?store=`. Deployed live. Verified split: Amazon $1,837 (445 games), Android $420 (31), iOS $35 (6) over 45d — ~80% of revenue is Amazon.
 - Note on server git: Caddyfile is gitignored but the earlier tracked copy causes `git pull` to complain about local changes. Redeploy recipe: `cp Caddyfile /root/Caddyfile.live; git checkout -- Caddyfile; git pull; cp /root/Caddyfile.live Caddyfile; docker compose up -d --build`. (Documented in memory.)
 
+### Done (part 17 — per-game search)
+- Dashboard `/api/games?q=&store=` search endpoint + toolbar search box (dropdown, store-aware). Opens any of the 482 games (not just top-12) → its detail page. Deployed + verified live.
+- Portal now filters 3 ways: time (presets+calendar), store (All/Amazon/Android/iOS), game (search).
+
 ### Blocked on owner (optional / later)
 - Change portal password from the default.
 
