@@ -51,20 +51,27 @@ def data_range():
     }
 
 
+def _store_filter(query, model, store):
+    """Restrict a revenue/spend query to one store by joining Game. store None/'all' = no filter."""
+    if store and store != "all":
+        query = query.join(Game, Game.id == model.game_id).filter(Game.store == store)
+    return query
+
+
 @app.get("/api/daily")
-def daily(start: str | None = None, end: str | None = None):
+def daily(start: str | None = None, end: str | None = None, store: str | None = None):
     start_date, end_date = _range(start, end)
     with session_factory()() as s:
-        revenue = dict(
+        rq = _store_filter(
             s.query(AdRevenueRecord.date, func.sum(AdRevenueRecord.revenue))
-            .filter(AdRevenueRecord.date >= start_date, AdRevenueRecord.date <= end_date)
-            .group_by(AdRevenueRecord.date).all()
-        )
-        spend = dict(
+            .filter(AdRevenueRecord.date >= start_date, AdRevenueRecord.date <= end_date),
+            AdRevenueRecord, store)
+        sq = _store_filter(
             s.query(CampaignRecord.date, func.sum(CampaignRecord.spend))
-            .filter(CampaignRecord.date >= start_date, CampaignRecord.date <= end_date)
-            .group_by(CampaignRecord.date).all()
-        )
+            .filter(CampaignRecord.date >= start_date, CampaignRecord.date <= end_date),
+            CampaignRecord, store)
+        revenue = dict(rq.group_by(AdRevenueRecord.date).all())
+        spend = dict(sq.group_by(CampaignRecord.date).all())
     days_list = [start_date + timedelta(days=i) for i in range((end_date - start_date).days + 1)]
     return {
         "labels": [d.isoformat() for d in days_list],
@@ -74,16 +81,17 @@ def daily(start: str | None = None, end: str | None = None):
 
 
 @app.get("/api/top-games")
-def top_games(start: str | None = None, end: str | None = None, limit: int = 12):
+def top_games(start: str | None = None, end: str | None = None, limit: int = 12, store: str | None = None):
     start_date, end_date = _range(start, end)
     with session_factory()() as s:
-        rows = (
+        q = (
             s.query(Game.id, Game.name, Game.store, func.sum(AdRevenueRecord.revenue).label("rev"))
             .join(Game, Game.id == AdRevenueRecord.game_id)
             .filter(AdRevenueRecord.date >= start_date, AdRevenueRecord.date <= end_date)
-            .group_by(Game.id).order_by(func.sum(AdRevenueRecord.revenue).desc())
-            .limit(limit).all()
         )
+        if store and store != "all":
+            q = q.filter(Game.store == store)
+        rows = q.group_by(Game.id).order_by(func.sum(AdRevenueRecord.revenue).desc()).limit(limit).all()
     return {
         "ids": [game_id for game_id, _, _, _ in rows],
         "labels": [f"{name[:26]} [{store}]" for _, name, store, _ in rows],
@@ -173,14 +181,18 @@ def game_detail(game_id: int, start: str | None = None, end: str | None = None):
 
 
 @app.get("/api/stats")
-def stats(start: str | None = None, end: str | None = None):
+def stats(start: str | None = None, end: str | None = None, store: str | None = None):
     """Revenue/spend/ROAS for the selected range (drives the top cards)."""
     start_date, end_date = _range(start, end)
     with session_factory()() as s:
-        revenue = s.query(func.coalesce(func.sum(AdRevenueRecord.revenue), 0.0)).filter(
-            AdRevenueRecord.date >= start_date, AdRevenueRecord.date <= end_date).scalar()
-        spend = s.query(func.coalesce(func.sum(CampaignRecord.spend), 0.0)).filter(
-            CampaignRecord.date >= start_date, CampaignRecord.date <= end_date).scalar()
+        revenue = _store_filter(
+            s.query(func.coalesce(func.sum(AdRevenueRecord.revenue), 0.0)).filter(
+                AdRevenueRecord.date >= start_date, AdRevenueRecord.date <= end_date),
+            AdRevenueRecord, store).scalar()
+        spend = _store_filter(
+            s.query(func.coalesce(func.sum(CampaignRecord.spend), 0.0)).filter(
+                CampaignRecord.date >= start_date, CampaignRecord.date <= end_date),
+            CampaignRecord, store).scalar()
     roas = (revenue / spend) if spend else None
     return {
         "days": (end_date - start_date).days + 1,
@@ -191,15 +203,20 @@ def stats(start: str | None = None, end: str | None = None):
 
 
 @app.get("/api/summary")
-def summary():
-    """Range-independent info: lifetime P&L totals, game count, sources, alerts."""
+def summary(store: str | None = None):
+    """Lifetime P&L totals + game count (store-filterable), plus global sources/alerts."""
     with session_factory()() as s:
-        totals = s.query(
+        totals_q = s.query(
             func.coalesce(func.sum(PnLSnapshot.ad_revenue), 0.0),
             func.coalesce(func.sum(PnLSnapshot.spend), 0.0),
             func.coalesce(func.sum(PnLSnapshot.net), 0.0),
-        ).filter(PnLSnapshot.period == "lifetime").one()
-        games_count = s.query(func.count(Game.id)).scalar()
+        ).filter(PnLSnapshot.period == "lifetime")
+        games_q = s.query(func.count(Game.id))
+        if store and store != "all":
+            totals_q = totals_q.join(Game, Game.id == PnLSnapshot.game_id).filter(Game.store == store)
+            games_q = games_q.filter(Game.store == store)
+        totals = totals_q.one()
+        games_count = games_q.scalar()
         syncs = [
             {"source": x.source, "last": x.last_success_at.isoformat() if x.last_success_at else None,
              "note": x.freshness_note}
@@ -217,14 +234,16 @@ def summary():
 
 
 @app.get("/api/pnl")
-def pnl(limit: int = 15):
+def pnl(limit: int = 15, store: str | None = None):
     with session_factory()() as s:
-        rows = (
+        q = (
             s.query(PnLSnapshot, Game.name, Game.store)
             .join(Game, Game.id == PnLSnapshot.game_id)
             .filter(PnLSnapshot.period == "lifetime")
-            .order_by(PnLSnapshot.net.desc()).limit(limit).all()
         )
+        if store and store != "all":
+            q = q.filter(Game.store == store)
+        rows = q.order_by(PnLSnapshot.net.desc()).limit(limit).all()
     return [
         {"game": name, "store": store, "revenue": round(p.ad_revenue, 2),
          "spend": round(p.spend, 2), "dev_cost": round(p.dev_cost, 2), "net": round(p.net, 2)}
@@ -277,6 +296,13 @@ PAGE = """<!DOCTYPE html>
     <input type="date" id="from"> <span class="sep">to</span> <input type="date" id="to">
     <span class="muted" id="rangeinfo"></span>
   </div>
+  <div class="toolbar" id="storebar">
+    <span class="muted" style="margin-right:4px">Store:</span>
+    <button data-store="all" class="active">All</button>
+    <button data-store="amazon">Amazon</button>
+    <button data-store="android">Android</button>
+    <button data-store="ios">iOS</button>
+  </div>
   <div class="cards" id="cards"></div>
   <div class="panel"><h2 id="dailyTitle">Revenue vs Spend</h2><canvas id="daily"></canvas></div>
   <div class="panel"><h2 id="topTitle">Top games by revenue</h2><canvas id="top"></canvas></div>
@@ -292,14 +318,25 @@ async function j(url) { return (await fetch(url)).json(); }
 const iso = (d) => d.toISOString().slice(0,10);
 
 let bounds = null, lifetime = null, dailyChart = null, topChart = null;
+let store = 'all', curStart = null, curEnd = null;
 
 function setActive(btn) {
   document.querySelectorAll('#toolbar button').forEach(b => b.classList.remove('active'));
-  if (btn) btn.classList.add(btn ? 'active' : '');
+  if (btn) btn.classList.add('active');
+}
+
+async function loadSummary() {
+  const sum = await j('/api/summary?store=' + store);
+  lifetime = { net: sum.lifetime.net, games: sum.games };
+  const p = await j('/api/pnl?store=' + store);
+  $('pnl').innerHTML = '<tr><th>Game</th><th>Store</th><th class="num">Revenue</th><th class="num">Spend</th><th class="num">Dev cost</th><th class="num">Net</th></tr>' +
+    (p.length ? p.map(r => `<tr><td>${r.game}</td><td>${r.store}</td><td class="num">${usd(r.revenue)}</td><td class="num">${usd(r.spend)}</td><td class="num">${usd(r.dev_cost)}</td><td class="num ${r.net>=0?'pos':'neg'}">${usd(r.net)}</td></tr>`).join('') : '<tr><td class="muted">no data for this store</td></tr>');
+  return sum;
 }
 
 async function loadRange(start, end) {
-  const qs = `start=${start}&end=${end}`;
+  curStart = start; curEnd = end;
+  const qs = `start=${start}&end=${end}&store=${store}`;
   const [st, d, t] = await Promise.all([j('/api/stats?'+qs), j('/api/daily?'+qs), j('/api/top-games?'+qs)]);
   const roas = st.roas === null ? 'n/a' : st.roas.toFixed(2);
   const roasCls = st.roas === null ? '' : (st.roas >= 1 ? 'pos' : 'neg');
@@ -330,7 +367,7 @@ async function loadRange(start, end) {
     options:{ indexAxis:'y', plugins:{legend:{display:false}},
       onClick: (evt, els) => { if (els.length) {
         const id = topChart.gameIds[els[0].index];
-        window.location = `/game/${id}?start=${$('from').value}&end=${$('to').value}`; } },
+        window.location = `/game/${id}?start=${$('from').value}&end=${$('to').value}`; } }, // per-game page (store N/A, one game)
       onHover: (evt, els) => { evt.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
       scales:{
       x:{ticks:{color:'#8a8f98'}, grid:{color:'#23262e'}},
@@ -350,19 +387,17 @@ function presetRange(days) {
 }
 
 (async () => {
-  const [b, sum] = await Promise.all([j('/api/range'), j('/api/summary')]);
-  bounds = b; lifetime = { net: sum.lifetime.net, games: sum.games };
+  const [b, sum] = await Promise.all([j('/api/range'), loadSummary()]);
+  bounds = b;
   $('from').min = b.min; $('from').max = b.max; $('to').min = b.min; $('to').max = b.max;
 
+  // sources + alerts are global (not store-filtered)
   $('sources').innerHTML = '<tr><th>Source</th><th>Last OK</th><th>Freshness</th></tr>' +
     sum.sources.map(x => `<tr><td>${x.source}</td><td>${x.last ? x.last.replace('T',' ').slice(0,16) : '-'}</td><td class="muted">${x.note||''}</td></tr>`).join('');
   $('alerts').innerHTML = sum.alerts.length
     ? '<tr><th>When</th><th>Severity</th><th>Module</th><th>Message</th></tr>' +
       sum.alerts.map(a => `<tr><td>${a.at}</td><td class="${a.severity==='warn'||a.severity==='critical'?'neg':''}">${a.severity}</td><td>${a.module}</td><td>${a.message}</td></tr>`).join('')
     : '<tr><td class="muted">no alerts</td></tr>';
-  const p = await j('/api/pnl');
-  $('pnl').innerHTML = '<tr><th>Game</th><th>Store</th><th class="num">Revenue</th><th class="num">Spend</th><th class="num">Dev cost</th><th class="num">Net</th></tr>' +
-    p.map(r => `<tr><td>${r.game}</td><td>${r.store}</td><td class="num">${usd(r.revenue)}</td><td class="num">${usd(r.spend)}</td><td class="num">${usd(r.dev_cost)}</td><td class="num ${r.net>=0?'pos':'neg'}">${usd(r.net)}</td></tr>`).join('');
 
   document.querySelectorAll('#toolbar button').forEach(btn => btn.addEventListener('click', () => {
     setActive(btn);
@@ -377,6 +412,15 @@ function presetRange(days) {
   };
   $('from').addEventListener('change', onDateChange);
   $('to').addEventListener('change', onDateChange);
+
+  // store filter: refetch lifetime cards/pnl + current range
+  document.querySelectorAll('#storebar button').forEach(btn => btn.addEventListener('click', async () => {
+    document.querySelectorAll('#storebar button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    store = btn.dataset.store;
+    await loadSummary();
+    loadRange(curStart, curEnd);
+  }));
 
   const [s, e] = presetRange(7);
   loadRange(s, e);
