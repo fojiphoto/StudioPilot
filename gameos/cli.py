@@ -265,6 +265,63 @@ def map_campaign(
     typer.echo(f"mapped {ua_platform}/{campaign_id} -> {game.name} ({updated} existing rows updated)")
 
 
+@app.command(name="enrich-names")
+def enrich_names(
+    store: str = typer.Option("amazon", help="Which store's games to look up"),
+    limit: int = typer.Option(1000, help="Max games to process this run"),
+    delay: float = typer.Option(0.4, help="Seconds between requests (be polite)"),
+) -> None:
+    """Fetch real app titles from the store for games still named by bundle id.
+    Amazon Appstore: resolves https://www.amazon.com/gp/mas/dl/android?p=<pkg> og:title."""
+    import re
+    import time
+
+    import httpx
+
+    from gameos.kernel.models import Game
+
+    ua = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+          "(KHTML, like Gecko) Chrome/120 Safari/537.36")
+
+    def clean(title: str) -> str:
+        title = re.sub(r"\s+", " ", title).strip()
+        for sep in (". ", " - ", " | "):
+            if sep in title:
+                title = title.split(sep)[0]
+        return title[:80].strip()
+
+    engine = Engine()
+    with engine.ctx.session() as session:
+        games = (
+            session.query(Game)
+            .filter(Game.store == store, Game.display_name.is_(None))
+            .limit(limit).all()
+        )
+        typer.echo(f"{len(games)} {store} games to look up")
+        ok = 0
+        with httpx.Client(headers={"User-Agent": ua}, follow_redirects=True, timeout=25) as client:
+            for game in games:
+                pkg = game.package_name or game.name
+                if not pkg or "." not in pkg:
+                    continue
+                try:
+                    if store == "amazon":
+                        r = client.get("https://www.amazon.com/gp/mas/dl/android", params={"p": pkg})
+                        m = re.search(r'property="og:title" content="([^"]+)"', r.text)
+                        title = m.group(1) if m else None
+                    else:
+                        title = None
+                    if title:
+                        game.display_name = clean(title)
+                        ok += 1
+                        typer.echo(f"  {pkg} -> {game.display_name}")
+                except Exception as exc:
+                    typer.echo(f"  {pkg} FAILED: {exc}", err=True)
+                time.sleep(delay)
+            session.commit()
+    typer.echo(f"named {ok}/{len(games)} games")
+
+
 @app.command()
 def report() -> None:
     """Print current status: source freshness, ROAS, P&L, recent alerts."""
