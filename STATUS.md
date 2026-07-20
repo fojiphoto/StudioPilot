@@ -110,6 +110,13 @@
 - Portal redesign: gradient header + 🎮 logo mark, gradient stat cards with accent bar, store badges (Amazon/Android/iOS SVG glyphs + colors), game icons everywhere. Top-games is now a clickable **leaderboard** (rank + icon + name + badge + gradient bar + revenue) instead of a Chart.js bar. P&L table + search dropdown show icons + badges. Game detail header shows big icon + badge. Android/iOS (no scrapable icon) show a colored initial placeholder.
 - Verified live-rendered in browser (real auth). NOTE: accessing the portal with credentials embedded in the URL (`user:pass@host`) breaks relative `fetch()` in some browsers — normal auth-dialog login is unaffected.
 
+### Done (part 20 — CRITICAL revenue correctness fix)
+- Owner revealed AdMob is used as an **adapter inside AppLovin MAX mediation**, so AdMob earnings are already in the MAX total (as the AdMob network line). GameOS was adding standalone AdMob API revenue on top → **double-counting** (showed $311 vs MAX's real $298 for 7d).
+- Fix: added `GAMEOS_DISABLED_MODULES` config; disabled `admob` on the server; deleted all `admob` AdRevenueRecord rows (8,383). MAX is now the sole authoritative ad-revenue source.
+- Verified: GameOS 7d = $298.09 vs AppLovin dashboard $298.03 — now matches (6c diff = MAX revising the current partial day).
+- Gotcha for redeploys: config changes need `docker compose up -d --build` (rebuild image — the running image had stale code) then `--force-recreate` to pick up new env_file vars.
+- If a game ever uses AdMob standalone (not via MAX), re-enable admob for it — but current setup is fully MAX-mediated.
+
 ### Blocked on owner (optional / later)
 - Change portal password from the default.
 - ~20 Amazon games with no store title/icon (likely delisted) show bundle id + initial placeholder — rename manually if needed.
