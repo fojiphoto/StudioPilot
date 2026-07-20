@@ -1,4 +1,11 @@
 """AdMob connector - Mediation Report API.
+
+IMPORTANT: If AdMob is used as an adapter INSIDE AppLovin MAX mediation (the common
+setup), its earnings are ALREADY included in the MAX report (as the AdMob network
+line). Running this connector too would double-count that revenue. In that case keep
+this module disabled via GAMEOS_DISABLED_MODULES=admob. Only enable it for apps that
+serve AdMob standalone (not mediated through MAX).
+
 Pulls day-level earnings/impressions/eCPM per app/country/ad-source and stores
 normalized AdRevenueRecord rows (source="admob"). Games auto-register on first sight.
 
